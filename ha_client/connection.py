@@ -45,7 +45,7 @@ class HAConnection:
         with self._client() as client:
             resp = client.post(
                 f"{self.base_url}/api/{path.lstrip('/')}",
-                content=json.dumps(data or {}),
+                content=json.dumps(data or {}, ensure_ascii=False).encode("utf-8"),
             )
             resp.raise_for_status()
             if resp.content:
@@ -56,7 +56,7 @@ class HAConnection:
         with self._client() as client:
             resp = client.put(
                 f"{self.base_url}/api/{path.lstrip('/')}",
-                content=json.dumps(data),
+                content=json.dumps(data, ensure_ascii=False).encode("utf-8"),
             )
             resp.raise_for_status()
             if resp.content:

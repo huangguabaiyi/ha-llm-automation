@@ -130,8 +130,8 @@ def normalize_automation(config: dict) -> dict:
     规范化自动化配置，使其能被 HA REST API 接受：
     1. 字段名：trigger->triggers, condition->conditions, action->actions
     2. 动作格式：service: -> action:（HA 2024.10+）
-    3. alias：中文转拼音 ASCII（HA API 不接受非 ASCII 字段值）
-    4. description：含非 ASCII 时清空（同上限制）
+    3. alias：中文转拼音 ASCII（HA 用 alias 做标识符，必须 ASCII）
+    4. description：补空字符串兜底（中文 description 通过 UTF-8 正常发送）
     """
     out = dict(config)
 
@@ -150,17 +150,12 @@ def normalize_automation(config: dict) -> dict:
             new_actions.append(act)
         out["actions"] = new_actions
 
-    # alias 含非 ASCII -> 转拼音
+    # alias 含非 ASCII -> 转拼音（HA 用 alias 做标识符，必须 ASCII）
     if "alias" in out:
-        original_alias = out["alias"]
-        out["alias"] = _to_ascii_alias(str(original_alias))
-        # 把原始中文名存入 description（如果 description 为空）
-        if not out.get("description") and original_alias != out["alias"]:
-            out["description"] = ""  # description 也不能含中文，留空
+        out["alias"] = _to_ascii_alias(str(out["alias"]))
 
-    # description 含非 ASCII -> 清空；不存在时补空字符串（HA 必须有此字段才能保存内容）
-    if out.get("description") and not all(ord(c) < 128 for c in out["description"]):
-        out["description"] = ""
+    # description 不存在时补空字符串（HA 必须有此字段才能保存 triggers/actions）
+    # 中文 description 通过 ensure_ascii=False 编码为 UTF-8 发送，HA 可正常接受
     if "description" not in out:
         out["description"] = ""
 
