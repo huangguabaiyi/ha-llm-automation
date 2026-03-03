@@ -47,7 +47,13 @@ class HAConnection:
                 f"{self.base_url}/api/{path.lstrip('/')}",
                 content=json.dumps(data or {}, ensure_ascii=False).encode("utf-8"),
             )
-            resp.raise_for_status()
+            if not resp.is_success:
+                body = resp.text[:600].strip()
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase} — HA 说：{body}",
+                    request=resp.request,
+                    response=resp,
+                )
             if resp.content:
                 return resp.json()
             return {}
@@ -58,7 +64,13 @@ class HAConnection:
                 f"{self.base_url}/api/{path.lstrip('/')}",
                 content=json.dumps(data, ensure_ascii=False).encode("utf-8"),
             )
-            resp.raise_for_status()
+            if not resp.is_success:
+                body = resp.text[:600].strip()
+                raise httpx.HTTPStatusError(
+                    f"{resp.status_code} {resp.reason_phrase} — HA 说：{body}",
+                    request=resp.request,
+                    response=resp,
+                )
             if resp.content:
                 return resp.json()
             return {}

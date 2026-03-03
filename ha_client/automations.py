@@ -128,12 +128,15 @@ def unwrap_automation(config: dict) -> dict:
 def normalize_automation(config: dict) -> dict:
     """
     规范化自动化配置，使其能被 HA REST API 接受：
-    1. 字段名：trigger->triggers, condition->conditions, action->actions
-    2. 动作格式：service: -> action:（HA 2024.10+）
-    3. alias：中文转拼音 ASCII（HA 用 alias 做标识符，必须 ASCII）
-    4. description：补空字符串兜底（中文 description 通过 UTF-8 正常发送）
+    1. 剔除 HA 状态/meta 字段（last_triggered / uid / state / context 等）
+    2. 字段名：trigger->triggers, condition->conditions, action->actions
+    3. 动作格式：service: -> action:（HA 2024.10+）
+    4. alias：中文转拼音 ASCII（HA 用 alias 做标识符，必须 ASCII）
+    5. description：移除非 ASCII + 补空字符串兜底
     """
-    out = dict(config)
+    # HA 状态/meta 字段不属于 automation config，直接剔除
+    _META_FIELDS = {"last_triggered", "uid", "state", "context", "entity_id"}
+    out = {k: v for k, v in config.items() if k not in _META_FIELDS}
 
     # 字段名统一为复数
     for old, new in [("trigger", "triggers"), ("condition", "conditions"), ("action", "actions")]:
@@ -162,7 +165,6 @@ def normalize_automation(config: dict) -> dict:
                                   "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'}
         for uc, asc in _UNICODE_REPLACEMENTS.items():
             desc = desc.replace(uc, asc)
-        # 移除剩余非 ASCII 字符
         desc = "".join(c for c in desc if ord(c) < 128).strip()
         out["description"] = desc
     if "description" not in out:

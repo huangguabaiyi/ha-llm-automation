@@ -1224,7 +1224,11 @@ def consolidate(
                 new_id = automation_manager.create_automation(merged_config)
                 rprint(f"[green]  合并创建成功（ID: {new_id}）[/green]")
             except Exception as e:
-                rprint(f"[red]  合并创建失败：{e}，跳过删除旧自动化[/red]")
+                rprint(f"[red]  合并创建失败：{e}[/red]")
+                rprint("[dim]  发送的 payload 预览（供排查）：[/dim]")
+                preview = yaml.dump(merged_config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+                rprint(Panel(preview[:1000], title="payload", border_style="red"))
+                rprint("[dim]  跳过删除旧自动化[/dim]")
                 continue
         for old_id in ids_to_delete:
             try:
