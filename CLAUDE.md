@@ -181,18 +181,45 @@ HA 中存在两类自动化：
 - YAML 型：`attributes.restored = true, state = unavailable`（HA 重启后从 state DB 恢复）
 - 存储型：`state = on/off`，正常工作
 
-### ⚠️ 创建自动化的三个必要条件
+### ⚠️ 创建自动化的必要条件 & normalize_automation() 处理
 
 向 `POST /api/config/automation/config/new` 发送的 payload 必须同时满足：
 
 1. **含 `id` 字段**：13 位毫秒时间戳（如 `"1772515732053"`），否则 HA 以为是未保存的草稿
 2. **含 `description` 字段**：哪怕是空字符串 `""`，否则 triggers/actions 不被持久化
-3. **alias 必须为 ASCII**：HA API 不接受中文字段值（任何字段含中文均返回 500）
+3. **alias 必须为纯 ASCII**：HA API 不接受中文 alias（返回 500）
 
-`normalize_automation()` 函数自动处理上述三点：
-- 中文 alias → pypinyin 转拼音 snake_case（HA 用 alias 做标识符，必须 ASCII）
-- description 中文 → **保留**，通过 `ensure_ascii=False` + UTF-8 编码正常发送
-- 注入 `id: str(int(time.time() * 1000))`
+`normalize_automation()` 函数（`ha_client/automations.py`）自动处理以上问题，以及：
+
+- **剔除 meta 字段**：`last_triggered`、`uid`、`state`、`context`、顶层 `entity_id` 不属于 config schema，LLM 可能从原配置复制这些字段，必须清除（否则 400）
+- **alias**：中文 → `pypinyin` 转拼音 snake_case
+- **description**：替换常见 Unicode 符号（`→` → `->`），再移除全部非 ASCII 字符（HA 配置 API 不接受非 ASCII）；不存在时补 `""`
+- **旧版字段名**：`trigger` → `triggers`，`condition` → `conditions`，`action` → `actions`，`service:` → `action:`
+- **注入 id**：`str(int(time.time() * 1000))`（由 `create_automation()` 负责）
+
+### ⚠️ choose 块内 conditions 不能用 trigger 语法
+
+`choose` 里的 `conditions` 使用 **condition 语法**，不能用 trigger 专属字段：
+
+```yaml
+# ❌ 错误：at: 是 trigger 专属字段
+actions:
+  - choose:
+      - conditions:
+          - at: "22:00:00"   # HA 会返回 400：extra keys not allowed
+
+# ✅ 正确：condition: time 语法
+actions:
+  - choose:
+      - conditions:
+          - condition: time
+            after: "22:00:00"
+            before: "07:00:00"
+```
+
+### ⚠️ HTTP 错误信息
+
+`connection.py` 的 `post()` / `put()` 失败时会在异常中附带 HA 返回的 response body（最多 600 字符），便于定位具体原因。
 
 ### HA 2024+ 新版字段名
 
@@ -218,26 +245,31 @@ mode: single
 
 ---
 
-## 四、两步 LLM 创建流程
+## 四、两步 LLM 创建流程（支持单条/多条自动化）
 
 ```
 get_entities() → 过滤隐藏/禁用/诊断实体 + 注入区域
        ↓
 Step 1：可行性检查（build_feasibility_prompt）
-  - LLM 语义推断需要哪些实体（触发器 + 动作目标）
+  - LLM 推断实现所有需求所需的实体（返回并集）
   - 返回 JSON: {"feasible": bool, "entities": [...], "reason": "..."}
   - 不可行 → 显示原因，退出
        ↓
 Step 2：YAML 生成（build_system_prompt，仅含 Step1 筛出的实体）
-  - 生成带 description 字段的完整 YAML
+  - 每条自动化单独输出一个 ```yaml``` 代码块
        ↓
-交互式修改循环：
-  - 展示 YAML，提示"输入修改意见（直接回车接受）"
-  - 有意见 → LLM 携带当前 YAML + 修改要求重新生成 → 循环
-  - 回车接受 → 校验 → 确认写入
-       ↓
-normalize → validate → 备份 → create_automation → reload
+【单条自动化】交互式修改循环：
+  - 展示 YAML → 输入修改意见 → LLM 重新生成 → 循环
+  - 直接回车接受 → 校验 → 确认写入
+  → normalize → validate → 备份 → create_automation → reload
+
+【多条自动化】批量预览 + 选择写入：
+  - 逐条展示并校验（幻觉实体/action字段错误标红警告）
+  - 用户可输入要跳过的编号（如 2,5）或直接回车全部写入
+  → normalize → 备份 → 批量 create_automation → reload
 ```
+
+`parse_automations_from_text()` 支持解析：单 dict / list[dict] / 多个独立 yaml 块 / `automation:` 顶层包装
 
 ---
 
@@ -281,9 +313,10 @@ normalize → validate → 备份 → create_automation → reload
 
 ## 七、备份管理
 
-- 每次 create/update 写入前自动备份全量自动化
-- 备份文件：`backup/archives/automations_backup_{YYYYMMDD_HHMMSS}.json`
-- 保留最近 10 个版本，自动清理旧备份
+- 每次 create/update/consolidate 写入前自动备份全量自动化
+- 备份文件：`backup/archives/automations_backup_{YYYYMMDD_HHMMSS}.yaml`（**YAML 格式，可直接导入 HA**）
+- `list_backups` / `restore_backup` 向后兼容旧 `.json` 备份
+- 保留最近 10 个版本（yaml + json 合并计算），自动清理旧备份
 - `backup restore` 支持交互式选择恢复版本
 
 ---
@@ -296,7 +329,7 @@ normalize → validate → 备份 → create_automation → reload
 python3 main.py
 ```
 
-启动后显示模式选择菜单：
+启动后显示模式选择菜单（while 循环，完成一次操作后自动返回菜单）：
 ```
 ╭─ 请选择模式 ────────────────────────────────────────────────╮
 │ HA 自动化大模型工具                                         │
@@ -304,6 +337,8 @@ python3 main.py
 │   1. 创建  — 用自然语言描述，AI 生成新自动化               │
 │   2. 优化  — 分析并优化单条已有自动化                      │
 │   3. 聚合  — 批量整合所有自动化（合并重复、纠正错误）      │
+│                                                             │
+│   输入 exit 退出                                            │
 ╰─────────────────────────────────────────────────────────────╯
 >
 ```
@@ -338,6 +373,7 @@ python3 main.py backup restore [--file <path>]
 - `pypinyin` — 中文转拼音（alias ASCII 化）
 - `beautifulsoup4` + `markdownify` — 文档抓取
 - `rich` + `typer` — CLI 界面
+- `readline` — 标准库，修复 macOS 下 `input()` 退格/方向键异常
 - `websocket-client` — WebSocket（获取实体注册表）
 
 ### 安全原则
@@ -393,39 +429,54 @@ python3 main.py backup restore [--file <path>]
 
 ### 多条自动化批量整合（`consolidate` 命令）
 
-**功能目标**：分析当前全部自动化，发现可合并的重复项和逻辑错误，输出优化方案供用户逐条确认后执行。
+**功能目标**：分析当前全部自动化，按使用场景合并重复项、纠正逻辑错误，供用户逐条确认后执行。
+
+**场景驱动合并策略**（`build_consolidate_prompt` 4 步分析）：
+
+```
+Step 1：识别每条自动化的使用场景
+        离家节能 / 到家迎接 / 睡前准备 / 起床唤醒 / 夜间安全 / 定时控制 / 温湿度联动 ...
+
+Step 2：判断合并条件
+  ✅ 触发相同（或等价）且属于同一场景 → 合并（即使操作不同的设备）
+     例：离家后关灯 + 离家后关电扇 → 合并为「离家节能」
+  ❌ 触发不同 / 场景目的明显不同 → 不合并
+
+Step 3：找出需修复的问题
+        幻觉实体 / 旧版字段名 / 缺少description / 逻辑错误
+
+Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备操作）
+```
+
+**LLM 输出 JSON 格式**：
+```json
+{
+  "merge_groups": [
+    {"ids": [...], "aliases": [...], "scenario": "离家节能", "reason": "...", "merged_yaml": "..."}
+  ],
+  "fix_items": [{"id": "...", "alias": "...", "issue": "...", "fixed_yaml": "..."}],
+  "ok_items": [{"id": "...", "alias": "..."}]
+}
+```
 
 **完整流程**：
 
 ```
-1. list_automations() 获取所有自动化摘要
-2. 批量 GET /api/config/automation/config/{id} 获取全量完整配置
-   （跳过 id 为空或 "new" 的无效条目）
-   + get_entities(config) 获取实体列表
-3. LLM 单次分析（build_consolidate_prompt，传入全部 YAML + 实体列表）
-   输出 JSON：
-   {
-     "merge_groups": [
-       {"ids": [...], "aliases": [...], "reason": "...", "merged_yaml": "..."}
-     ],
-     "fix_items": [
-       {"id": "...", "alias": "...", "issue": "...", "fixed_yaml": "..."}
-     ],
-     "ok_items": [{"id": "...", "alias": "..."}]
-   }
-4. 格式化展示整合方案（合并组/修复项/无需变动数量）
-5. 逐条展示 YAML → 用户确认（直接回车接受 / 输入修改意见 / 输入 s 跳过）
-6. 追问修改循环（同 create 命令）
-7. 执行前整体备份 →
-   - 合并：先 create 新自动化，确认成功后 delete 旧自动化
-   - 纠错：update 对应自动化
-   - reload automations
+1. list_automations() → 批量 GET 完整配置（跳过 GET 失败 / id 为空 / "new" 的条目）
+2. LLM 场景分析 → 展示方案（含场景标签）
+3. 逐条展示 YAML → 用户确认（回车接受 / 输入意见让 AI 改 / s 跳过）
+4. 整体备份 → 执行：
+   - 合并：create 新 → 成功后 delete 旧
+   - 修复：update 对应自动化
+   - reload
+5. 执行失败（400等）→ 自动把 HA 错误 + YAML 发给 LLM 修复，最多重试 2 次
 ```
 
 **注意事项**：
-- 自动化 YAML 总量超过约 40000 字符时自动截断，优先保留前 N 条
+- YAML 总量超过约 40000 字符时自动截断，优先保留前 N 条
 - 合并必须先确认新自动化写入成功才删除旧的
 - `--dry-run` 模式只展示方案，不执行写入/删除
+- `_llm_fix_yaml(parsed, ha_error)` 内部函数负责错误驱动的自动修复
 
 ---
 
@@ -434,8 +485,12 @@ python3 main.py backup restore [--file <path>]
 - [ ] `update` 命令：`POST /{id}` 写入内容是否正确持久化（待验证）
 - [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
-- [ ] consolidate 命令：尚未实测完整执行流程
+- [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
 - [ ] `backup restore`：逐条恢复流程完整性验证
+
+### macOS 退格键 / 方向键异常
+
+**已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。
 
 ---
 
