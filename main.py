@@ -370,37 +370,77 @@ def create(
         rprint(Panel(response, title="AI 回复", border_style="yellow"))
         raise typer.Exit(1)
 
-    rprint("\n[bold]生成的自动化配置：[/bold]")
-    rprint(Panel(yaml_str, title="YAML", border_style="green"))
+    # ------------------------------------------------------------------
+    # 交互式修改循环：展示 YAML → 用户确认或提修改意见 → 循环直到满意
+    # ------------------------------------------------------------------
+    valid_ids = {e["entity_id"] for e in entities} if entities else set()
 
-    # 解析校验
-    try:
-        auto_config = unwrap_automation(parsed)
-        validate_automation(auto_config)
-    except Exception as e:
-        rprint(f"[red]YAML 校验失败：{e}[/red]")
-        raise typer.Exit(1)
+    while True:
+        rprint("\n[bold]生成的自动化配置：[/bold]")
+        rprint(Panel(yaml_str, title="YAML", border_style="green"))
 
-    # 实体 ID 合法性校验
-    if entities:
-        valid_ids = {e["entity_id"] for e in entities}
-        used_ids = extract_entity_ids(auto_config)
-        invalid_ids = used_ids - valid_ids
-        if invalid_ids:
-            rprint(f"[yellow]警告：以下实体 ID 在 HA 中不存在（可能是 LLM 编造）：[/yellow]")
-            for eid in sorted(invalid_ids):
-                rprint(f"  [red]  - {eid}[/red]")
-            if not typer.confirm("仍要继续写入？", default=False):
-                raise typer.Exit()
+        # 解析校验
+        try:
+            auto_config = unwrap_automation(parsed)
+            validate_automation(auto_config)
+        except Exception as e:
+            rprint(f"[red]YAML 校验失败：{e}，请输入修改意见重新生成[/red]")
+            auto_config = None
 
-        # action 格式校验：检测是否将 entity_id 错填为 action/service
-        bad_actions = extract_action_services(auto_config) & valid_ids
-        if bad_actions:
-            rprint(f"[red]错误：以下 action 字段填写了实体 ID 而非服务名（如应写 light.turn_off 而非实体 ID）：[/red]")
-            for a in sorted(bad_actions):
-                rprint(f"  [red]  - {a}[/red]")
-            rprint("[dim]请重试或使用 --dry-run 查看生成内容[/dim]")
-            raise typer.Exit(1)
+        # 实体 ID 合法性校验
+        if auto_config and valid_ids:
+            used_ids = extract_entity_ids(auto_config)
+            invalid_ids = used_ids - valid_ids
+            if invalid_ids:
+                rprint("[yellow]警告：以下实体 ID 在 HA 中不存在（可能是 LLM 编造）：[/yellow]")
+                for eid in sorted(invalid_ids):
+                    rprint(f"  [red]  - {eid}[/red]")
+
+            bad_actions = extract_action_services(auto_config) & valid_ids
+            if bad_actions:
+                rprint("[red]错误：以下 action 字段填写了实体 ID 而非服务名：[/red]")
+                for a in sorted(bad_actions):
+                    rprint(f"  [red]  - {a}[/red]")
+                auto_config = None  # 强制修改
+
+        # 提示用户输入修改意见
+        rprint("\n[dim]输入修改意见后回车让 AI 重新生成；直接回车接受当前配置[/dim]")
+        feedback = input("> ").strip()
+
+        if not feedback:
+            if auto_config is None:
+                rprint("[yellow]当前配置存在问题，请先输入修改意见[/yellow]")
+                continue
+            break  # 用户满意，退出循环
+
+        # 用户有修改意见 → 调用 LLM 重新生成
+        modify_msg = f"""请修改以下 Home Assistant 自动化配置：
+
+当前配置：
+```yaml
+{yaml_str}
+```
+
+修改要求：{feedback}
+
+请输出修改后的完整 YAML 配置。"""
+
+        with console.status("AI 修改中..."):
+            try:
+                response = llm.chat_with_retry(
+                    messages=[{"role": "user", "content": modify_msg}],
+                    system=system_prompt,
+                )
+            except Exception as e:
+                rprint(f"[red]LLM 调用失败：{e}[/red]")
+                continue
+
+        yaml_str = extract_yaml_from_text(response)
+        parsed = yaml.safe_load(yaml_str)
+        if not isinstance(parsed, dict):
+            rprint("[yellow]AI 未能生成 YAML，请重新描述修改意见[/yellow]")
+            rprint(Panel(response, title="AI 回复", border_style="yellow"))
+            continue
 
     if dry_run:
         rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
