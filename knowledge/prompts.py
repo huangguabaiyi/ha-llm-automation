@@ -200,20 +200,20 @@ def build_feasibility_prompt(entities: list[dict]) -> str:
 
 {entity_section}
 
-## 分析规则
-1. 找出与需求相关的区域和设备
-2. 判断该区域是否存在满足需求的可控设备或传感器
-3. **只能使用上方列表中出现的 entity_id**
+## 分析步骤
+1. 理解需求：推断实现这个自动化需要哪些类型的设备参与（例如：感知状态的传感器、执行操作的可控设备、特定区域的灯/开关等）
+2. 在实体列表中搜索所有参与设备，找出能满足需求的具体 entity_id
+3. 判断每类必要设备是否都能找到；若有任何一类缺失，则不可行
 
 ## 输出格式（严格 JSON，不加代码块、不加任何其他文字）
 可行时：
-{{"feasible": true, "entities": ["entity_id_1", "entity_id_2"], "reason": "找到客厅的可控灯光设备"}}
+{{"feasible": true, "entities": ["entity_id_1", "entity_id_2"], "reason": "找到驾照传感器和测试房间的可控设备"}}
 
 不可行时：
 {{"feasible": false, "entities": [], "reason": "该区域没有可控设备，无法完成此操作"}}
 
 requirements:
 - 返回纯 JSON，不要 markdown 代码块
-- entities 只列出本次需求真正需要的实体 ID
+- entities 列出实现该自动化所需的**全部**实体 ID
 - reason 用中文简短说明\
 """
