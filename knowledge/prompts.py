@@ -76,11 +76,11 @@ mode: single
 ```
 
 ### description 字段规范（唯一会被 HA 持久化保存的备注）：
-  - 必填，用中文简要描述自动化逻辑，格式：`触发条件 → 执行动作`
-  - 有条件判断时写明：`触发条件 → 条件检查 → 执行动作`
-  - 示例：`description: "每天22点 → 关闭客厅所有灯"`
-  - 示例：`description: "客厅有人 → 判断当前时段 → 开灯或播报"`
-  - 【注意】YAML 中 # 注释在写入 HA 时会被丢弃，不要依赖注释传递信息，统一写进 description
+  - 必填，用**纯英文 ASCII**描述自动化逻辑，格式：`trigger -> action`
+  - 有条件判断时：`trigger -> condition check -> action`
+  - 示例：`description: "Every day at 22:00 -> turn off all living room lights"`
+  - 示例：`description: "Living room occupied -> turn on lights"`
+  - 【注意】HA 配置 API 不接受非 ASCII 字符，description 必须全英文；YAML # 注释写入时丢弃，无需添加
 
 ### 实体选择规则：
 - **只能使用上方实体列表中出现的 entity_id**，禁止编造不存在的实体

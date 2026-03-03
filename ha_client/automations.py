@@ -154,8 +154,10 @@ def normalize_automation(config: dict) -> dict:
     if "alias" in out:
         out["alias"] = _to_ascii_alias(str(out["alias"]))
 
-    # description 不存在时补空字符串（HA 必须有此字段才能保存 triggers/actions）
-    # 中文 description 通过 ensure_ascii=False 编码为 UTF-8 发送，HA 可正常接受
+    # description 含非 ASCII -> 清空（HA 配置 API 服务端不接受非 ASCII 字符）
+    # 不存在时补空字符串（HA 必须有此字段才能保存 triggers/actions）
+    if out.get("description") and not out["description"].isascii():
+        out["description"] = ""
     if "description" not in out:
         out["description"] = ""
 
