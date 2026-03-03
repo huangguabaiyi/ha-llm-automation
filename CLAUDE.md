@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** CLI 流程已跑通（create 核心功能验证完毕），待完善 update/backup/restore，再封装为 HA Custom Component。
+**开发阶段：** create 核心功能已完善（两步 LLM 流程 + 追问修改循环），待完善 update/backup/restore，再封装为 HA Custom Component。
 
 ---
 
@@ -22,9 +22,9 @@ HA自动化工具/
 ├── ha_client/
 │   ├── __init__.py
 │   ├── connection.py          # HAConnection, load_config
-│   ├── entities.py            # EntityManager（带5分钟缓存）
+│   ├── entities.py            # EntityManager + fetch_registry_data
 │   ├── automations.py         # AutomationManager + 工具函数
-│   └── ws_client.py           # WebSocket 客户端（备用）
+│   └── ws_client.py           # WebSocket 客户端
 ├── llm_client/
 │   ├── __init__.py            # create_client() 工厂函数
 │   ├── base.py                # BaseLLMClient 抽象基类
@@ -32,7 +32,7 @@ HA自动化工具/
 │   └── anthropic_client.py    # Anthropic Claude 接口
 ├── knowledge/
 │   ├── fetcher.py             # DocFetcher（抓取+缓存，7天TTL）
-│   ├── prompts.py             # build_system_prompt()
+│   ├── prompts.py             # build_system_prompt() / build_feasibility_prompt()
 │   └── cache/                 # 文档本地缓存（已缓存7个HA官方文档）
 ├── backup/
 │   ├── manager.py             # BackupManager
@@ -69,9 +69,18 @@ HA自动化工具/
   "knowledge": {
     "cache_dir": "./knowledge/cache",
     "cache_ttl_days": 7
+  },
+  "domains": {
+    "extra_visible": [],
+    "hidden": []
   }
 }
 ```
+
+`domains` 字段用于自定义传给 LLM 的实体域白名单：
+- `extra_visible`：追加额外 domain（如 `["notify", "remote"]`）
+- `hidden`：屏蔽不想展示的 domain（如 `["weather"]`）
+- 留空则使用内置默认白名单（见下方）
 
 ### 反向代理注意事项
 
@@ -96,10 +105,48 @@ GET /api/states/{entity_id}       # 获取单个实体状态
 
 ### EntityManager（`ha_client/entities.py`）
 
-- `get_all_entities()` — 带 5 分钟本地缓存
-- `get_entities_by_domain(domain)` — 按域过滤
-- `search_entities(keyword)` — 模糊搜索
+- `EntityManager(conn, exclude_ids=set())` — 构造时传入要过滤的实体 ID 集合
+- `get_all_entities()` — 带 5 分钟本地缓存，首次 fetch 时一次性过滤 exclude_ids
+- `get_entities_by_domain(domain)` / `search_entities(keyword)` — 按域/关键字过滤
 - 传给 LLM 的实体摘要按 domain 白名单过滤 attribute，避免超出 token 限制
+
+### fetch_registry_data（`ha_client/entities.py`）
+
+```python
+fetch_registry_data(config) -> {"area_map": {...}, "exclude_ids": set()}
+```
+
+通过 WebSocket 获取实体注册表，返回：
+- `area_map`：`{entity_id: area_name}`，含实体/设备两级区域继承
+- `exclude_ids`：需过滤的实体集合
+  - `disabled_by` 非 null（禁用实体）
+  - `hidden_by` 非 null（隐藏实体，注意 `/api/states` 仍会返回隐藏实体）
+  - `entity_category` in `("diagnostic", "config")`（诊断/配置类）
+
+失败时返回空值，不阻断主流程。
+
+### get_entities()（`main.py` 公共 helper）
+
+```python
+get_entities(config) -> list[dict]
+```
+
+三步合一：fetch_registry_data → EntityManager(exclude_ids) → enrich_entities_with_areas。
+所有命令（create / update / list-entities）统一调用此 helper，确保拿到的实体列表是干净的。
+
+### 实体列表格式（prompts._build_entity_section）
+
+- **全局/虚拟类实体**（todo/calendar/timer/input_* 等）在顶部独立展示，不被 150 条上限截断
+- **物理实体**按区域分组，含 `domain` 列，LLM 自行判断 trigger/action 用途
+- 默认可见 domain 白名单（`DEFAULT_VISIBLE_DOMAINS`）：
+
+```
+可控设备：light, switch, climate, cover, fan, media_player, lock, vacuum,
+          scene, script, button, select, number
+输入辅助：input_boolean, input_select, input_number, input_text
+传感器：  sensor, binary_sensor, device_tracker
+其他：    todo, calendar, timer, counter, weather, person
+```
 
 ---
 
@@ -123,20 +170,21 @@ GET /api/states/{entity_id}       # 获取单个实体状态
 
 向 `POST /api/config/automation/config/new` 发送的 payload 必须同时满足：
 
-1. **含 `id` 字段**：13 位毫秒时间戳（如 `"1772515732053"`），否则 HA 以为是未保存的草稿，UI 点开直接跳新建页面
-2. **含 `description` 字段**：哪怕是空字符串 `""`，否则 triggers/actions 不被持久化（保存为空）
+1. **含 `id` 字段**：13 位毫秒时间戳（如 `"1772515732053"`），否则 HA 以为是未保存的草稿
+2. **含 `description` 字段**：哪怕是空字符串 `""`，否则 triggers/actions 不被持久化
 3. **alias 必须为 ASCII**：HA API 不接受中文字段值（任何字段含中文均返回 500）
 
 `normalize_automation()` 函数自动处理上述三点：
 - 中文 alias → pypinyin 转拼音 snake_case
-- 中文 description → 清空为 `""`
-- 注入 `description: ""` 兜底
-- 注入 `id: str(int(time.time() * 1000))`（在 `create_automation()` 里完成）
+- **中文 description → 清空为 `""`**（HA API 不接受中文 description，LLM 生成的中文 description 会被强制清空）
+- 注入 `id: str(int(time.time() * 1000))`
+
+> ⚠️ 因此 description 字段虽然在 YAML 预览时显示中文，写入 HA 后会被清空。
+> 这是 HA API 限制，暂无绕过方案。
 
 ### HA 2024+ 新版字段名
 
 ```yaml
-# 新版（HA 2024.10+，API 返回和接受的格式）
 alias: turn_on_light_morning
 triggers:           # 不是 trigger:
   - trigger: time   # 不是 platform: time
@@ -154,12 +202,34 @@ mode: single
 ### 自动化 ID 说明
 
 - HA 存储的 automation ID 为 13 位毫秒时间戳字符串（如 `"1769504038939"`）
-- 通过 REST API 创建的自动化，其 entity state 的 `attributes.id` 可能显示为 `"new"`（已知 HA 行为），但自动化内容是正确的
-- 自动化存储在 HA 内部（非 `automations.yaml`），在 HA UI「设置 → 自动化」中可见
+- 通过 REST API 创建的自动化，entity state 的 `attributes.id` 可能显示为 `"new"`（已知 HA 行为），自动化内容本身是正确的
 
 ---
 
-## 四、HA 官方文档学习模块
+## 四、两步 LLM 创建流程
+
+```
+get_entities() → 过滤隐藏/禁用/诊断实体 + 注入区域
+       ↓
+Step 1：可行性检查（build_feasibility_prompt）
+  - LLM 语义推断需要哪些实体（触发器 + 动作目标）
+  - 返回 JSON: {"feasible": bool, "entities": [...], "reason": "..."}
+  - 不可行 → 显示原因，退出
+       ↓
+Step 2：YAML 生成（build_system_prompt，仅含 Step1 筛出的实体）
+  - 生成带 description 字段的完整 YAML
+       ↓
+交互式修改循环：
+  - 展示 YAML，提示"输入修改意见（直接回车接受）"
+  - 有意见 → LLM 携带当前 YAML + 修改要求重新生成 → 循环
+  - 回车接受 → 校验 → 确认写入
+       ↓
+normalize → validate → 备份 → create_automation → reload
+```
+
+---
+
+## 五、HA 官方文档学习模块
 
 ### 已缓存文档（`knowledge/cache/`）
 
@@ -173,22 +243,16 @@ mode: single
 | scripts | https://www.home-assistant.io/docs/scripts/ |
 | service_calls | https://www.home-assistant.io/docs/scripts/service-calls/ |
 
-### DocFetcher（`knowledge/fetcher.py`）
-
-- `get_doc(url)` — 优先读缓存，过期自动重新抓取
-- `get_preset_docs(keys)` — 批量获取指定文档
-- `refresh_all_docs()` — 强制刷新全部文档
-- 缓存 TTL：7 天，按 URL MD5 命名文件
-
 ### 提示词构建（`knowledge/prompts.py`）
 
-- `build_system_prompt(docs, entities)` — 组装 System Prompt
-- 包含：HA 文档摘要（优先级排序）+ 当前实体列表（Markdown 表格）
-- 文档最多 12000 字符，实体最多 150 条，控制 token 消耗
+- `build_system_prompt(docs, entities, visible_domains)` — Step 2 YAML 生成提示词
+- `build_feasibility_prompt(entities, visible_domains)` — Step 1 可行性检查提示词
+- `DEFAULT_VISIBLE_DOMAINS` — 默认可见域集合（可被 config.domains 覆盖）
+- 文档最多 12000 字符，实体最多 150 条（全局实体优先，不受截断影响）
 
 ---
 
-## 五、LLM API 接口配置
+## 六、LLM API 接口配置
 
 ### 支持的 Provider
 
@@ -198,21 +262,9 @@ mode: single
 | `openai` | OpenAI 官方 API |
 | `openai_compatible` | 兼容 OpenAI 格式的第三方接口（DeepSeek、Ollama、中转站等）|
 
-### 核心对话流程
-
-1. 用户输入自然语言需求
-2. 获取实体列表 + 加载 HA 文档缓存
-3. `build_system_prompt()` 构建带上下文的 System Prompt
-4. 调用 LLM 生成 YAML（要求英文 alias、新版字段名、无 `automation:` 包装）
-5. `extract_yaml_from_text()` 提取代码块
-6. `unwrap_automation()` 去除多余包装层
-7. `normalize_automation()` 转换格式 + 注入 description
-8. `validate_automation()` 校验必要字段
-9. 用户确认 → 备份当前自动化 → `create_automation()` 写入
-
 ---
 
-## 六、备份管理
+## 七、备份管理
 
 - 每次 create/update 写入前自动备份全量自动化
 - 备份文件：`backup/archives/automations_backup_{YYYYMMDD_HHMMSS}.json`
@@ -221,7 +273,7 @@ mode: single
 
 ---
 
-## 七、CLI 命令速查
+## 八、CLI 命令速查
 
 ```bash
 python3 main.py init                          # 交互式初始化配置
@@ -238,17 +290,18 @@ python3 main.py backup restore [--file <path>]
 
 ---
 
-## 八、开发规范
+## 九、开发规范
 
 ### 技术栈
 
-- **Python 3.9+**（需 `from __future__ import annotations` 兼容 `|` 语法）
+- **Python 3.9+**（所有文件需 `from __future__ import annotations` 兼容 `|` 语法）
 - `httpx` — HTTP 客户端
 - `anthropic` / `openai` — LLM SDK
-- `pyyaml` — YAML 解析
+- `pyyaml` — YAML 解析（注意：解析时丢弃 `#` 注释，不要依赖注释传递信息）
 - `pypinyin` — 中文转拼音（alias ASCII 化）
 - `beautifulsoup4` + `markdownify` — 文档抓取
 - `rich` + `typer` — CLI 界面
+- `websocket-client` — WebSocket（获取实体注册表）
 
 ### 安全原则
 
@@ -257,18 +310,24 @@ python3 main.py backup restore [--file <path>]
 - 写入前自动备份，确保可回滚
 - 删除操作需二次确认
 
+### Git
+
+- 已初始化本地 git 仓库（不需要 GitHub）
+- 每次完成功能点后 commit 存档
+
 ---
 
-## 九、已知问题 / 待调试
+## 十、已知问题 / 待调试
 
 - [ ] `update` 命令：`POST /{id}` 写入内容是否正确持久化（待验证）
 - [ ] `list-automations`：通过 states 获取的 id 部分为 `"new"`，影响 update 时选择目标
 - [ ] `backup restore`：逐条恢复流程完整性验证
+- [ ] description 中文写入 HA 被 normalize 清空，需要研究是否有绕过方案
 - [ ] 整体端到端回归测试
 
 ---
 
-## 十、后续封装为 HA 插件规划
+## 十一、后续封装为 HA 插件规划
 
 1. 将核心逻辑提取为独立 Python 包
 2. 创建 `custom_components/ha_llm_automation/` 目录
@@ -279,7 +338,7 @@ python3 main.py backup restore [--file <path>]
 
 ---
 
-## 十一、快速开始
+## 十二、快速开始
 
 ```bash
 # 1. 安装依赖
@@ -295,7 +354,7 @@ python3 main.py test-connection
 # 4. 抓取 HA 文档（首次必做）
 python3 main.py refresh-docs
 
-# 5. 创建第一个自动化
+# 5. 创建第一个自动化（--dry-run 先预览）
 python3 main.py create "每天晚上10点关闭客厅灯" --dry-run
 python3 main.py create "每天晚上10点关闭客厅灯"
 ```
