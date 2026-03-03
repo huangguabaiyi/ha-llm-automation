@@ -175,12 +175,9 @@ get_entities(config) -> list[dict]
 3. **alias 必须为 ASCII**：HA API 不接受中文字段值（任何字段含中文均返回 500）
 
 `normalize_automation()` 函数自动处理上述三点：
-- 中文 alias → pypinyin 转拼音 snake_case
-- **中文 description → 清空为 `""`**（HA API 不接受中文 description，LLM 生成的中文 description 会被强制清空）
+- 中文 alias → pypinyin 转拼音 snake_case（HA 用 alias 做标识符，必须 ASCII）
+- description 中文 → **保留**，通过 `ensure_ascii=False` + UTF-8 编码正常发送
 - 注入 `id: str(int(time.time() * 1000))`
-
-> ⚠️ 因此 description 字段虽然在 YAML 预览时显示中文，写入 HA 后会被清空。
-> 这是 HA API 限制，暂无绕过方案。
 
 ### HA 2024+ 新版字段名
 
@@ -322,7 +319,6 @@ python3 main.py backup restore [--file <path>]
 - [ ] `update` 命令：`POST /{id}` 写入内容是否正确持久化（待验证）
 - [ ] `list-automations`：通过 states 获取的 id 部分为 `"new"`，影响 update 时选择目标
 - [ ] `backup restore`：逐条恢复流程完整性验证
-- [ ] description 中文写入 HA 被 normalize 清空，需要研究是否有绕过方案
 - [ ] 整体端到端回归测试
 
 ---
