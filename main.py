@@ -23,7 +23,8 @@ from ha_client.connection import HAConnection, load_config
 from ha_client.entities import (EntityManager, enrich_entities_with_areas,
                                  fetch_registry_data)
 from knowledge.fetcher import DocFetcher, HA_DOC_URLS
-from knowledge.prompts import build_feasibility_prompt, build_system_prompt
+from knowledge.prompts import (DEFAULT_VISIBLE_DOMAINS, build_feasibility_prompt,
+                               build_system_prompt)
 from llm_client import create_client
 
 app = typer.Typer(
@@ -87,6 +88,14 @@ def get_entities(config: dict) -> list[dict]:
         entities = enrich_entities_with_areas(entities, area_map)
 
     return entities
+
+
+def get_visible_domains(config: dict) -> set[str]:
+    """从 config.domains 计算最终可见 domain 集合"""
+    domains_cfg = config.get("domains", {})
+    extra = set(domains_cfg.get("extra_visible") or [])
+    hidden = set(domains_cfg.get("hidden") or [])
+    return (DEFAULT_VISIBLE_DOMAINS | extra) - hidden
 
 
 def get_doc_fetcher(config: dict) -> DocFetcher:
@@ -291,13 +300,14 @@ def create(
                 rprint(f"[yellow]警告：文档加载失败（{e}），将不含文档知识[/yellow]")
 
     llm = create_client(config["llm"])
+    visible_domains = get_visible_domains(config)
 
     # ------------------------------------------------------------------
     # Step 1 — 可行性检查
     # ------------------------------------------------------------------
     step1_entities: list[str] = []
     if entities:
-        feasibility_prompt = build_feasibility_prompt(entities)
+        feasibility_prompt = build_feasibility_prompt(entities, visible_domains=visible_domains)
         with console.status("Step 1/2 — 分析需求可行性..."):
             try:
                 feasibility_response = llm.chat_with_retry(
@@ -338,7 +348,7 @@ def create(
         # Step 1 entities 为空但 feasible=true → fallback 全量
         filtered_entities = entities
 
-    system_prompt = build_system_prompt(docs, filtered_entities)
+    system_prompt = build_system_prompt(docs, filtered_entities, visible_domains=visible_domains)
 
     with console.status("Step 2/2 — AI 生成 YAML..."):
         try:
@@ -485,7 +495,7 @@ def update(
         except Exception:
             pass
 
-    system_prompt = build_system_prompt(docs, entities)
+    system_prompt = build_system_prompt(docs, entities, visible_domains=get_visible_domains(config))
     user_msg = f"""请修改以下 Home Assistant 自动化配置：
 
 当前配置：

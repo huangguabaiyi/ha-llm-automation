@@ -20,5 +20,9 @@
   "knowledge": {
     "cache_dir": "./knowledge/cache",
     "cache_ttl_days": 7
+  },
+  "domains": {
+    "extra_visible": [],
+    "hidden": []
   }
 }

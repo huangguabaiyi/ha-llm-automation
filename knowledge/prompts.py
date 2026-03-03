@@ -1,24 +1,26 @@
 """提示词构建模块"""
+from __future__ import annotations
 
 
-def build_system_prompt(docs: dict[str, str], entities: list[dict]) -> str:
+def build_system_prompt(
+    docs: dict[str, str],
+    entities: list[dict],
+    visible_domains: set[str] | None = None,
+) -> str:
     """
     构建包含 HA 文档知识和实体列表的 System Prompt。
 
     docs: {key: markdown_content}
     entities: EntitySummary 列表
+    visible_domains: 可见 domain 集合，None 时使用默认白名单
     """
     sections: list[str] = [_ROLE_PROMPT]
 
-    # --- HA 文档知识 ---
     if docs:
-        doc_section = _build_doc_section(docs)
-        sections.append(doc_section)
+        sections.append(_build_doc_section(docs))
 
-    # --- 可用实体列表 ---
     if entities:
-        entity_section = _build_entity_section(entities)
-        sections.append(entity_section)
+        sections.append(_build_entity_section(entities, visible_domains=visible_domains))
 
     sections.append(_OUTPUT_RULES)
     return "\n\n".join(sections)
@@ -108,92 +110,109 @@ def _build_doc_section(docs: dict[str, str], max_chars: int = 12000) -> str:
     return "\n".join(parts)
 
 
-# domain 分类白名单
-_CONTROLLABLE_DOMAINS = {
+# 默认可见 domain 白名单（可通过 config.json 的 domains.visible 覆盖）
+DEFAULT_VISIBLE_DOMAINS: set[str] = {
+    # 可控设备（常用于 action）
     "light", "switch", "climate", "cover", "fan",
-    "media_player", "lock", "vacuum", "select", "number",
-    "button", "scene", "script",
+    "media_player", "lock", "vacuum", "scene", "script",
+    "button", "select", "number",
+    # 输入辅助（可做 trigger 也可做 action）
+    "input_boolean", "input_select", "input_number", "input_text",
+    # 传感器（常用于 trigger/condition）
+    "sensor", "binary_sensor", "device_tracker",
+    # 其他常用
+    "todo", "calendar", "timer", "counter", "weather", "person",
 }
-_SENSOR_DOMAINS = {
-    "sensor", "binary_sensor", "input_boolean",
-    "input_number", "device_tracker",
+
+# 全局/虚拟类 domain：不属于具体房间，单独列在顶部区域组之前
+_GLOBAL_DOMAINS: set[str] = {
+    "todo", "calendar", "timer", "counter", "weather",
+    "person", "input_boolean", "input_select", "input_number", "input_text",
+    "script", "scene",
 }
 
 
-def _build_entity_section(entities: list[dict], max_entities: int = 150) -> str:
-    """构建实体列表章节（按区域+类型两级分组）"""
-    has_area = any(e.get("area") for e in entities)
-
-    if not has_area:
-        # 无区域信息时降级为平铺表格（只保留可展示 domain）
-        lines = ["## 当前可用实体列表\n"]
-        lines.append("entity_id | 名称 | 状态")
-        lines.append("--- | --- | ---")
-        count = 0
-        for e in entities:
-            domain = e.get("domain", "")
-            if domain not in _CONTROLLABLE_DOMAINS and domain not in _SENSOR_DOMAINS:
-                continue
-            if count >= max_entities:
-                break
-            lines.append(f"{e.get('entity_id','')} | {e.get('friendly_name','')} | {e.get('state','')}")
-            count += 1
-        return "\n".join(lines)
-
-    # 按区域分组，unknown 区域放到最后
+def _build_entity_section(
+    entities: list[dict],
+    max_entities: int = 150,
+    visible_domains: set[str] | None = None,
+) -> str:
+    """构建实体列表章节（全局实体顶部展示，物理实体按区域分组，含 domain 列）"""
+    domains = visible_domains if visible_domains is not None else DEFAULT_VISIBLE_DOMAINS
     _NO_AREA = "（未分配区域）"
+
+    # 分为"全局/虚拟"和"物理/区域"两类
+    global_entities: list[dict] = []
     area_groups: dict[str, list[dict]] = {}
+
     for e in entities:
         domain = e.get("domain", "")
-        if domain not in _CONTROLLABLE_DOMAINS and domain not in _SENSOR_DOMAINS:
+        if domain not in domains:
             continue
-        area = e.get("area") or _NO_AREA
-        area_groups.setdefault(area, []).append(e)
+        if domain in _GLOBAL_DOMAINS:
+            global_entities.append(e)
+        else:
+            area = e.get("area") or _NO_AREA
+            area_groups.setdefault(area, []).append(e)
 
-    lines = ["## 可用实体（按区域和类型分类）\n"]
+    if not global_entities and not area_groups:
+        return "## 当前可用实体列表\n\n（无可用实体）"
+
+    lines = [
+        "## 可用实体",
+        "",
+        "说明：light/switch/climate/fan/cover 等可作为 action 目标；"
+        "sensor/binary_sensor/todo/calendar 等可作为 trigger/condition 来源；"
+        "input_boolean/input_select/script 等两者皆可。",
+    ]
     total = 0
 
+    # 全局实体优先展示
+    if global_entities:
+        lines.append("\n### 全局服务与虚拟实体")
+        lines.append("entity_id | domain | 名称 | 状态")
+        lines.append("--- | --- | --- | ---")
+        for e in global_entities:
+            if total >= max_entities:
+                break
+            lines.append(
+                f"{e.get('entity_id','')} | {e.get('domain','')} | "
+                f"{e.get('friendly_name','')} | {e.get('state','')}"
+            )
+            total += 1
+
+    # 物理实体按区域分组
     for area in sorted(area_groups.keys(), key=lambda a: (a == _NO_AREA, a)):
         if total >= max_entities:
             break
         lines.append(f"\n### {area}")
+        lines.append("entity_id | domain | 名称 | 状态")
+        lines.append("--- | --- | --- | ---")
+        for e in area_groups[area]:
+            if total >= max_entities:
+                break
+            lines.append(
+                f"{e.get('entity_id','')} | {e.get('domain','')} | "
+                f"{e.get('friendly_name','')} | {e.get('state','')}"
+            )
+            total += 1
 
-        ents = area_groups[area]
-        controllable = [e for e in ents if e.get("domain", "") in _CONTROLLABLE_DOMAINS]
-        sensors = [e for e in ents if e.get("domain", "") in _SENSOR_DOMAINS]
-
-        if controllable:
-            lines.append("**可控设备**（可作为 action 目标）")
-            lines.append("entity_id | 名称 | 状态")
-            lines.append("--- | --- | ---")
-            for e in controllable:
-                if total >= max_entities:
-                    break
-                lines.append(f"{e.get('entity_id','')} | {e.get('friendly_name','')} | {e.get('state','')}")
-                total += 1
-
-        if sensors:
-            lines.append("**传感器/触发器**（可作为 trigger/condition 来源）")
-            lines.append("entity_id | 名称 | 状态")
-            lines.append("--- | --- | ---")
-            for e in sensors:
-                if total >= max_entities:
-                    break
-                lines.append(f"{e.get('entity_id','')} | {e.get('friendly_name','')} | {e.get('state','')}")
-                total += 1
-
-    if total >= max_entities and sum(len(v) for v in area_groups.values()) > max_entities:
+    total_all = len(global_entities) + sum(len(v) for v in area_groups.values())
+    if total >= max_entities and total_all > max_entities:
         lines.append(f"\n（实体过多，仅展示前 {max_entities} 个）")
 
     return "\n".join(lines)
 
 
-def build_feasibility_prompt(entities: list[dict]) -> str:
+def build_feasibility_prompt(
+    entities: list[dict],
+    visible_domains: set[str] | None = None,
+) -> str:
     """
     构建可行性检查阶段的 System Prompt（Step 1）。
     LLM 需分析用户需求是否可行，并严格返回 JSON。
     """
-    entity_section = _build_entity_section(entities)
+    entity_section = _build_entity_section(entities, visible_domains=visible_domains)
     return f"""\
 你是一名 Home Assistant 自动化分析专家。
 你的任务是：根据以下实体列表，分析用户的自动化需求是否可行。
