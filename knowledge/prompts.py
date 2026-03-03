@@ -64,6 +64,7 @@ _OUTPUT_RULES = """\
 ### 正确示例：
 ```yaml
 alias: close_light_at_22
+description: "Every day at 22:00, turn off the living room light (light.deng) to save energy at night"
 triggers:
   - trigger: time
     at: "22:00:00"
@@ -76,11 +77,18 @@ mode: single
 ```
 
 ### description 字段规范（唯一会被 HA 持久化保存的备注）：
-  - 必填，用**纯英文 ASCII**描述自动化逻辑，格式：`trigger -> action`
-  - 有条件判断时：`trigger -> condition check -> action`
-  - 示例：`description: "Every day at 22:00 -> turn off all living room lights"`
-  - 示例：`description: "Living room occupied -> turn on lights"`
-  - 【严格要求】只能使用 ASCII 字符，箭头必须用 `->` 而非 `→`（Unicode 箭头会导致写入失败）
+  - 必填，用**纯英文 ASCII** 写一段完整的功能说明，要让人一眼看出这个自动化做什么
+  - 内容要求：
+    1. **触发条件**：何时/何种情况下触发（时间、传感器状态、设备变化等）
+    2. **判断条件**（有则写）：满足什么额外条件才执行
+    3. **执行动作**：对哪些设备做了什么操作（开/关/调节/通知等）
+  - 格式建议：用完整英文句子，不要只写箭头缩写；多个动作用逗号分隔
+  - 示例：
+    - `description: "Every day at 22:00, turn off all lights in the living room (light.sofa, light.ceiling)"`
+    - `description: "When motion sensor in bedroom detects motion between 22:00-07:00, dim bedroom light to 10% brightness"`
+    - `description: "When todo list gets a new item tagged urgent, send a notification and turn on the study room light"`
+    - `description: "When living room temperature exceeds 26C and someone is home, turn on the air conditioner and set to 24C cool mode"`
+  - 【严格要求】只能使用 ASCII 字符，箭头必须用 `->` 或完整句子，绝不能用 `→`（Unicode 箭头会导致写入失败）
 
 ### 实体选择规则：
 - **只能使用上方实体列表中出现的 entity_id**，禁止编造不存在的实体
@@ -208,6 +216,149 @@ def _build_entity_section(
         lines.append(f"\n（实体过多，仅展示前 {max_entities} 个）")
 
     return "\n".join(lines)
+
+
+def build_optimize_analysis_prompt(
+    automation_yaml: str,
+    entities: list[dict],
+    visible_domains: set[str] | None = None,
+) -> str:
+    """
+    构建单条自动化优化 Step 1 分析提示词。
+    LLM 需理解意图、找出问题并给出优化建议，严格返回 JSON。
+    """
+    entity_section = _build_entity_section(entities, visible_domains=visible_domains)
+    return f"""\
+你是一名 Home Assistant 自动化专家，负责分析已有自动化的意图并找出优化点。
+
+## 要分析的自动化 YAML
+
+```yaml
+{automation_yaml}
+```
+
+{entity_section}
+
+## 分析任务
+1. 理解这条自动化的功能意图（它想做什么，为了什么目的）
+2. 列出它实际涉及的实体 ID
+3. 找出存在的问题，例如：description 缺失或过于简短、引用了不存在的实体、逻辑不完整、缺少合理 conditions 等
+4. 提出具体优化建议，例如：补充同意图相关的同类设备、完善 conditions、统一字段格式到 HA 2024+ 规范等
+
+## 输出格式（严格 JSON，不加代码块，不加任何其他文字）
+{{"intent": "用中文描述该自动化的功能意图（1-2句话）", "related_entities": ["entity_id_1", "entity_id_2"], "issues": ["问题1", "问题2"], "suggestions": ["建议1", "建议2"]}}
+
+requirements:
+- 返回纯 JSON，不要 markdown 代码块
+- issues 和 suggestions 用中文描述，没有问题时返回空数组
+- related_entities 只列出自动化中真正引用的实体 ID\
+"""
+
+
+def build_optimize_yaml_prompt(
+    automation_yaml: str,
+    analysis: dict,
+    entities: list[dict],
+    docs: dict[str, str] | None = None,
+    visible_domains: set[str] | None = None,
+) -> str:
+    """
+    构建单条自动化优化 Step 2 YAML 生成提示词。
+    基于 Step 1 的分析结果，生成优化后的完整 YAML。
+    """
+    sections: list[str] = [_ROLE_PROMPT]
+
+    if docs:
+        sections.append(_build_doc_section(docs))
+
+    if entities:
+        sections.append(_build_entity_section(entities, visible_domains=visible_domains))
+
+    intent = analysis.get("intent", "")
+    issues = analysis.get("issues", [])
+    suggestions = analysis.get("suggestions", [])
+
+    analysis_lines = [f"功能意图：{intent}"]
+    if issues:
+        analysis_lines.append("发现的问题：\n" + "\n".join(f"  - {i}" for i in issues))
+    if suggestions:
+        analysis_lines.append("优化建议：\n" + "\n".join(f"  - {s}" for s in suggestions))
+
+    sections.append(f"""\
+## 优化任务
+
+请基于以下分析，对这条 Home Assistant 自动化进行优化并输出完整的新 YAML 配置。
+
+### 原始配置
+```yaml
+{automation_yaml}
+```
+
+### 分析报告
+{chr(10).join(analysis_lines)}
+
+优化要求：
+- 必须保留原有核心功能，不得改变自动化的主要意图
+- 修正分析中列出的所有问题
+- 落实分析中的优化建议（如补充同类设备、完善 conditions 等）
+- 如原配置 description 缺失或过短，务必补充完整的英文描述\
+""")
+
+    sections.append(_OUTPUT_RULES)
+    return "\n\n".join(sections)
+
+
+def build_consolidate_prompt(
+    automations_data: list[dict],
+    entities: list[dict],
+    visible_domains: set[str] | None = None,
+    max_total_chars: int = 40000,
+) -> str:
+    """
+    构建多条自动化批量整合分析提示词。
+    automations_data: list of {id, alias, yaml_str}
+    LLM 返回 JSON {merge_groups, fix_items, ok_items}。
+    """
+    entity_section = _build_entity_section(entities, visible_domains=visible_domains)
+
+    # 构建自动化 YAML 列表，限制总字符数
+    auto_parts: list[str] = []
+    total_chars = 0
+    truncated = 0
+    for auto in automations_data:
+        block = f"### [{auto['id']}] {auto['alias']}\n```yaml\n{auto['yaml_str']}\n```"
+        if total_chars + len(block) > max_total_chars:
+            truncated = len(automations_data) - len(auto_parts)
+            break
+        auto_parts.append(block)
+        total_chars += len(block)
+
+    automations_str = "\n\n".join(auto_parts)
+    truncation_note = f"\n\n（注意：共 {len(automations_data)} 条自动化，因 token 限制仅分析前 {len(auto_parts)} 条）" if truncated else ""
+
+    return f"""\
+你是一名 Home Assistant 自动化专家，负责分析一组自动化并提出整合优化方案。
+
+{entity_section}
+
+## 当前所有自动化配置{truncation_note}
+
+{automations_str}
+
+## 分析任务
+1. 找出功能高度重复或触发/动作相似的自动化，建议合并为一条
+2. 找出引用了不存在的实体、逻辑错误或字段格式问题的自动化，建议纠正
+3. 其余运行良好的自动化标记为 ok，不做变动
+
+## 输出格式（严格 JSON，不加代码块）
+{{"merge_groups": [{{"ids": ["id1", "id2"], "aliases": ["alias1", "alias2"], "reason": "中文说明为什么可以合并", "merged_yaml": "合并后完整YAML（用\\n换行，不要加代码块标记）"}}], "fix_items": [{{"id": "id3", "alias": "alias3", "issue": "中文说明存在什么问题", "fixed_yaml": "修复后完整YAML（用\\n换行，不要加代码块标记）"}}], "ok_items": [{{"id": "id4", "alias": "alias4"}}]}}
+
+requirements:
+- 返回纯 JSON，不要 markdown 代码块
+- merged_yaml 和 fixed_yaml 是完整合法的自动化 YAML 字符串，换行用 \\n 转义
+- alias 必须是英文 snake_case，description 必须是纯 ASCII 英文句子
+- 如无需合并/修复，对应列表返回空数组 []\
+"""
 
 
 def build_feasibility_prompt(

@@ -3,6 +3,7 @@ HA 自动化大模型创建工具 — CLI 入口
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -23,8 +24,9 @@ from ha_client.connection import HAConnection, load_config
 from ha_client.entities import (EntityManager, enrich_entities_with_areas,
                                  fetch_registry_data)
 from knowledge.fetcher import DocFetcher, HA_DOC_URLS
-from knowledge.prompts import (DEFAULT_VISIBLE_DOMAINS, build_feasibility_prompt,
-                               build_system_prompt)
+from knowledge.prompts import (DEFAULT_VISIBLE_DOMAINS, build_consolidate_prompt,
+                               build_feasibility_prompt, build_optimize_analysis_prompt,
+                               build_optimize_yaml_prompt, build_system_prompt)
 from llm_client import create_client
 
 app = typer.Typer(
@@ -625,6 +627,498 @@ def update(
             raise typer.Exit(1)
 
     rprint(f"[green]自动化更新成功！[/green]")
+
+
+# ------------------------------------------------------------------
+# 命令：optimize — 单条自动化优化
+# ------------------------------------------------------------------
+
+@app.command()
+def optimize(
+    automation_id: Annotated[Optional[str], typer.Option("--id", help="要优化的自动化 ID")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="只展示优化结果，不写入 HA")] = False,
+    no_docs: Annotated[bool, typer.Option("--no-docs", help="不加载文档知识（节省 token）")] = False,
+):
+    """分析并优化单条已有自动化（两步 LLM：理解意图→生成优化 YAML）"""
+    config = get_config()
+    automation_manager = get_automation_manager(config)
+
+    # Step 1：选择自动化
+    if not automation_id:
+        with console.status("获取自动化列表..."):
+            automations = automation_manager.list_automations()
+        if not automations:
+            rprint("[yellow]当前没有任何自动化[/yellow]")
+            raise typer.Exit()
+        rprint("\n[bold]当前自动化列表：[/bold]")
+        for i, a in enumerate(automations, 1):
+            rprint(f"  {i}. [dim][{a['id']}][/dim] {a['alias']}")
+        idx_str = typer.prompt("输入序号选择要优化的自动化")
+        try:
+            idx = int(idx_str) - 1
+            automation_id = automations[idx]["id"]
+        except (ValueError, IndexError):
+            rprint("[red]无效序号[/red]")
+            raise typer.Exit(1)
+
+    # 获取完整配置
+    with console.status("获取自动化配置..."):
+        current = automation_manager.get_automation(automation_id)
+    current_yaml = automation_manager.to_yaml(current)
+    rprint(f"\n[bold]当前配置（{current.get('alias', automation_id)}）：[/bold]")
+    rprint(Panel(current_yaml, title="原始 YAML", border_style="blue"))
+
+    # 获取实体列表
+    entities: list[dict] = []
+    with console.status("获取实体列表..."):
+        try:
+            entities = get_entities(config)
+            rprint(f"[dim]实体列表：{len(entities)} 个[/dim]")
+        except Exception as e:
+            rprint(f"[yellow]警告：获取实体失败（{e}），将不含实体信息[/yellow]")
+
+    llm = create_client(config["llm"])
+    visible_domains = get_visible_domains(config)
+
+    # ------------------------------------------------------------------
+    # LLM Step 1 — 理解意图，找出问题和建议
+    # ------------------------------------------------------------------
+    analysis_prompt = build_optimize_analysis_prompt(
+        current_yaml, entities, visible_domains=visible_domains
+    )
+    with console.status("Step 1/2 — 分析自动化意图与优化点..."):
+        try:
+            analysis_response = llm.chat_with_retry(
+                messages=[{"role": "user", "content": "请分析这条自动化"}],
+                system=analysis_prompt,
+            )
+        except Exception as e:
+            rprint(f"[red]LLM 调用失败（Step 1）：{e}[/red]")
+            raise typer.Exit(1)
+
+    try:
+        analysis = json.loads(analysis_response.strip())
+    except Exception:
+        rprint("[yellow]警告：分析返回了非 JSON 格式，将跳过分析直接生成优化 YAML[/yellow]")
+        rprint(Panel(analysis_response, title="Step 1 原始回复", border_style="yellow"))
+        analysis = {}
+
+    # 展示分析报告
+    if analysis:
+        issues_text = "\n".join(f"  • {i}" for i in analysis.get("issues") or ["（无）"])
+        suggestions_text = "\n".join(f"  • {s}" for s in analysis.get("suggestions") or ["（无）"])
+        rprint(Panel(
+            f"[bold]功能意图：[/bold]{analysis.get('intent', '未知')}\n\n"
+            f"[bold]涉及实体：[/bold]{', '.join(analysis.get('related_entities') or []) or '（无）'}\n\n"
+            f"[bold]发现问题：[/bold]\n{issues_text}\n\n"
+            f"[bold]优化建议：[/bold]\n{suggestions_text}",
+            title="分析报告", border_style="cyan",
+        ))
+
+    if not typer.confirm("\n是否继续生成优化后的配置？", default=True):
+        rprint("[yellow]已取消[/yellow]")
+        raise typer.Exit()
+
+    # ------------------------------------------------------------------
+    # LLM Step 2 — 生成优化后的完整 YAML
+    # ------------------------------------------------------------------
+    docs: dict[str, str] = {}
+    if not no_docs:
+        fetcher = get_doc_fetcher(config)
+        with console.status("加载文档知识..."):
+            try:
+                docs = fetcher.get_preset_docs(
+                    ["automation_basic", "automation_trigger", "automation_action"]
+                )
+            except Exception:
+                pass
+
+    optimize_prompt = build_optimize_yaml_prompt(
+        current_yaml, analysis, entities, docs, visible_domains=visible_domains
+    )
+    with console.status("Step 2/2 — 生成优化后的 YAML..."):
+        try:
+            response = llm.chat_with_retry(
+                messages=[{"role": "user", "content": "请生成优化后的完整自动化配置"}],
+                system=optimize_prompt,
+            )
+        except Exception as e:
+            rprint(f"[red]LLM 调用失败（Step 2）：{e}[/red]")
+            raise typer.Exit(1)
+
+    yaml_str = extract_yaml_from_text(response)
+    parsed = yaml.safe_load(yaml_str)
+    if not isinstance(parsed, dict):
+        rprint("[yellow]AI 未能生成 YAML，返回了说明信息：[/yellow]")
+        rprint(Panel(response, title="AI 回复", border_style="yellow"))
+        raise typer.Exit(1)
+
+    # ------------------------------------------------------------------
+    # 交互式修改循环
+    # ------------------------------------------------------------------
+    valid_ids = {e["entity_id"] for e in entities} if entities else set()
+    system_prompt = build_system_prompt(docs, entities, visible_domains=visible_domains)
+
+    while True:
+        rprint("\n[bold]优化后的自动化配置：[/bold]")
+        rprint(Panel(yaml_str, title="优化 YAML", border_style="green"))
+
+        try:
+            auto_config = unwrap_automation(parsed)
+            validate_automation(auto_config)
+        except Exception as e:
+            rprint(f"[red]YAML 校验失败：{e}，请输入修改意见重新生成[/red]")
+            auto_config = None
+
+        if auto_config and valid_ids:
+            used_ids = extract_entity_ids(auto_config)
+            invalid_ids = used_ids - valid_ids
+            if invalid_ids:
+                rprint("[yellow]警告：以下实体 ID 在 HA 中不存在（可能是 LLM 编造）：[/yellow]")
+                for eid in sorted(invalid_ids):
+                    rprint(f"  [red]  - {eid}[/red]")
+
+        rprint("\n[dim]输入修改意见后回车让 AI 重新生成；直接回车接受当前配置[/dim]")
+        feedback = input("> ").strip()
+
+        if not feedback:
+            if auto_config is None:
+                rprint("[yellow]当前配置存在问题，请先输入修改意见[/yellow]")
+                continue
+            break
+
+        modify_msg = f"""请修改以下 Home Assistant 自动化配置：
+
+当前配置：
+```yaml
+{yaml_str}
+```
+
+修改要求：{feedback}
+
+请输出修改后的完整 YAML 配置。"""
+        with console.status("AI 修改中..."):
+            try:
+                response = llm.chat_with_retry(
+                    messages=[{"role": "user", "content": modify_msg}],
+                    system=system_prompt,
+                )
+            except Exception as e:
+                rprint(f"[red]LLM 调用失败：{e}[/red]")
+                continue
+        yaml_str = extract_yaml_from_text(response)
+        parsed = yaml.safe_load(yaml_str)
+        if not isinstance(parsed, dict):
+            rprint("[yellow]AI 未能生成 YAML，请重新描述修改意见[/yellow]")
+            continue
+
+    if dry_run:
+        rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
+        raise typer.Exit()
+
+    if not typer.confirm("\n是否将优化后的配置写入 Home Assistant？"):
+        rprint("[yellow]已取消[/yellow]")
+        raise typer.Exit()
+
+    auto_config = normalize_automation(auto_config)
+    backup_manager = get_backup_manager(config)
+    with console.status("备份中..."):
+        try:
+            existing = automation_manager.list_automations()
+            backup_file = backup_manager.create_backup(existing)
+            rprint(f"[dim]备份已保存：{backup_file}[/dim]")
+        except Exception as e:
+            rprint(f"[yellow]备份失败（{e}），是否仍要继续？[/yellow]")
+            if not typer.confirm("继续？", default=False):
+                raise typer.Exit()
+
+    with console.status("写入 Home Assistant..."):
+        try:
+            automation_manager.update_automation(automation_id, auto_config)
+            automation_manager.reload_automations()
+        except Exception as e:
+            rprint(f"[red]写入失败：{e}[/red]")
+            raise typer.Exit(1)
+
+    rprint(f"[green]自动化优化成功！[/green]")
+
+
+# ------------------------------------------------------------------
+# 命令：consolidate — 多条自动化批量整合
+# ------------------------------------------------------------------
+
+@app.command()
+def consolidate(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="只展示方案，不执行写入/删除")] = False,
+):
+    """分析全部自动化，合并重复项、纠正错误，逐条确认后执行"""
+    config = get_config()
+    automation_manager = get_automation_manager(config)
+    llm = create_client(config["llm"])
+    visible_domains = get_visible_domains(config)
+
+    # Step 1：获取所有自动化摘要
+    with console.status("获取自动化列表..."):
+        automations = automation_manager.list_automations()
+    if not automations:
+        rprint("[yellow]当前没有任何自动化[/yellow]")
+        raise typer.Exit()
+    rprint(f"[dim]共找到 {len(automations)} 条自动化[/dim]")
+
+    # 批量获取完整配置（跳过 id 无效的）
+    automations_data: list[dict] = []
+    with console.status("获取自动化完整配置..."):
+        for a in automations:
+            aid = a.get("id", "")
+            if not aid or aid == "new":
+                rprint(f"[dim]  跳过 {a['alias']}（ID 无效：{aid!r}）[/dim]")
+                continue
+            try:
+                full = automation_manager.get_automation(aid)
+                automations_data.append({
+                    "id": aid,
+                    "alias": a["alias"],
+                    "yaml_str": automation_manager.to_yaml(full),
+                })
+            except Exception as e:
+                rprint(f"[yellow]  跳过 {a['alias']}（获取失败：{e}）[/yellow]")
+
+    if not automations_data:
+        rprint("[yellow]没有可分析的自动化（所有条目 ID 无效或获取失败）[/yellow]")
+        raise typer.Exit()
+    rprint(f"[dim]成功获取 {len(automations_data)} 条完整配置[/dim]")
+
+    # 获取实体列表
+    entities: list[dict] = []
+    with console.status("获取实体列表..."):
+        try:
+            entities = get_entities(config)
+        except Exception:
+            pass
+
+    # LLM 单次整合分析
+    consolidate_prompt = build_consolidate_prompt(
+        automations_data, entities, visible_domains=visible_domains
+    )
+    with console.status("AI 分析整合方案中...（自动化较多时需要较长时间）"):
+        try:
+            analysis_response = llm.chat_with_retry(
+                messages=[{"role": "user", "content": "请分析以上所有自动化，给出整合优化方案"}],
+                system=consolidate_prompt,
+            )
+        except Exception as e:
+            rprint(f"[red]LLM 调用失败：{e}[/red]")
+            raise typer.Exit(1)
+
+    # 解析 JSON（LLM 有时会加 markdown 代码块，尝试多种方式提取）
+    plan: dict = {}
+    raw = analysis_response.strip()
+    try:
+        plan = json.loads(raw)
+    except Exception:
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            try:
+                plan = json.loads(m.group())
+            except Exception:
+                pass
+    if not plan:
+        rprint("[red]无法解析 AI 返回的分析结果[/red]")
+        rprint(Panel(analysis_response, title="AI 原始回复", border_style="red"))
+        raise typer.Exit(1)
+
+    merge_groups: list[dict] = plan.get("merge_groups") or []
+    fix_items: list[dict] = plan.get("fix_items") or []
+    ok_items: list[dict] = plan.get("ok_items") or []
+
+    # 展示总体方案
+    rprint("\n" + "=" * 60)
+    rprint("[bold]整合分析结果[/bold]")
+    rprint("=" * 60)
+
+    if not merge_groups and not fix_items:
+        rprint(f"[green]所有自动化运行良好，无需整合（共 {len(ok_items)} 条）[/green]")
+        raise typer.Exit()
+
+    if merge_groups:
+        rprint(f"\n[bold cyan]可合并的自动化组（{len(merge_groups)} 组）：[/bold cyan]")
+        for i, g in enumerate(merge_groups, 1):
+            names = " + ".join(g.get("aliases") or g.get("ids") or [])
+            rprint(f"  {i}. {names}")
+            rprint(f"     原因：{g.get('reason', '')}")
+
+    if fix_items:
+        rprint(f"\n[bold yellow]需要修复的自动化（{len(fix_items)} 条）：[/bold yellow]")
+        for i, f_ in enumerate(fix_items, 1):
+            rprint(f"  {i}. {f_.get('alias', f_.get('id', ''))}")
+            rprint(f"     问题：{f_.get('issue', '')}")
+
+    if ok_items:
+        rprint(f"\n[dim]无需变动：{len(ok_items)} 条[/dim]")
+
+    if not typer.confirm("\n是否逐条查看并确认每项变更？", default=True):
+        rprint("[yellow]已取消[/yellow]")
+        raise typer.Exit()
+
+    # 加载文档（追问修改循环使用）
+    docs: dict[str, str] = {}
+    fetcher = get_doc_fetcher(config)
+    with console.status("加载文档知识..."):
+        try:
+            docs = fetcher.get_preset_docs(
+                ["automation_basic", "automation_trigger", "automation_action"]
+            )
+        except Exception:
+            pass
+    system_prompt = build_system_prompt(docs, entities, visible_domains=visible_domains)
+    valid_ids = {e["entity_id"] for e in entities} if entities else set()
+
+    def _review_yaml_loop(
+        yaml_str: str,
+        title: str,
+        border: str,
+    ) -> dict | None:
+        """展示 YAML → 修改循环，返回接受的 dict 或 None（跳过）"""
+        parsed_ = yaml.safe_load(yaml_str) if yaml_str else None
+        if not yaml_str or not isinstance(parsed_, dict):
+            rprint("[yellow]  YAML 无效，自动跳过[/yellow]")
+            return None
+
+        while True:
+            rprint(Panel(yaml_str, title=title, border_style=border))
+            rprint("[dim]直接回车接受；输入修改意见让 AI 重新生成；输入 s 跳过此项[/dim]")
+            feedback = input("> ").strip()
+
+            if feedback.lower() == "s":
+                return None
+
+            if not feedback:
+                try:
+                    cfg = unwrap_automation(parsed_)
+                    validate_automation(cfg)
+                    return cfg
+                except Exception as e:
+                    rprint(f"[red]YAML 校验失败：{e}，请输入修改意见[/red]")
+                    continue
+
+            modify_msg = f"""请修改以下 Home Assistant 自动化配置：
+
+当前配置：
+```yaml
+{yaml_str}
+```
+
+修改要求：{feedback}
+
+请输出修改后的完整 YAML 配置。"""
+            with console.status("AI 修改中..."):
+                try:
+                    resp = llm.chat_with_retry(
+                        messages=[{"role": "user", "content": modify_msg}],
+                        system=system_prompt,
+                    )
+                except Exception as e:
+                    rprint(f"[red]LLM 调用失败：{e}[/red]")
+                    continue
+            yaml_str = extract_yaml_from_text(resp)
+            parsed_ = yaml.safe_load(yaml_str)
+            if not isinstance(parsed_, dict):
+                rprint("[yellow]AI 未能生成 YAML，请重新描述修改意见[/yellow]")
+
+    # 逐条确认合并组
+    confirmed_merges: list[dict] = []
+    for i, group in enumerate(merge_groups, 1):
+        names = " + ".join(group.get("aliases") or group.get("ids") or [])
+        rprint(f"\n[bold]合并方案 {i}/{len(merge_groups)}：{names}[/bold]")
+        rprint(f"原因：{group.get('reason', '')}")
+        cfg = _review_yaml_loop(
+            group.get("merged_yaml", ""), title="合并后的 YAML", border="green"
+        )
+        if cfg is not None:
+            group["_parsed"] = cfg
+            confirmed_merges.append(group)
+        else:
+            rprint("[dim]  已跳过此合并组[/dim]")
+
+    # 逐条确认修复项
+    confirmed_fixes: list[dict] = []
+    for i, item in enumerate(fix_items, 1):
+        rprint(f"\n[bold]修复方案 {i}/{len(fix_items)}：{item.get('alias', item.get('id', ''))}[/bold]")
+        rprint(f"问题：{item.get('issue', '')}")
+        cfg = _review_yaml_loop(
+            item.get("fixed_yaml", ""), title="修复后的 YAML", border="yellow"
+        )
+        if cfg is not None:
+            item["_parsed"] = cfg
+            confirmed_fixes.append(item)
+        else:
+            rprint("[dim]  已跳过此修复项[/dim]")
+
+    if not confirmed_merges and not confirmed_fixes:
+        rprint("[yellow]没有确认任何变更，退出[/yellow]")
+        raise typer.Exit()
+
+    # 执行计划摘要
+    rprint("\n[bold]执行计划摘要：[/bold]")
+    if confirmed_merges:
+        rprint(f"  合并：{len(confirmed_merges)} 组")
+    if confirmed_fixes:
+        rprint(f"  修复：{len(confirmed_fixes)} 条")
+
+    if dry_run:
+        rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
+        raise typer.Exit()
+
+    if not typer.confirm("\n确认执行以上所有变更？", default=False):
+        rprint("[yellow]已取消[/yellow]")
+        raise typer.Exit()
+
+    # 整体备份
+    backup_manager = get_backup_manager(config)
+    with console.status("备份中..."):
+        try:
+            existing = automation_manager.list_automations()
+            backup_file = backup_manager.create_backup(existing)
+            rprint(f"[dim]备份已保存：{backup_file}[/dim]")
+        except Exception as e:
+            rprint(f"[yellow]备份失败（{e}），是否仍要继续？[/yellow]")
+            if not typer.confirm("继续？", default=False):
+                raise typer.Exit()
+
+    # 执行合并（先 create 成功再 delete）
+    for group in confirmed_merges:
+        ids_to_delete: list[str] = group.get("ids") or []
+        merged_config = normalize_automation(group["_parsed"])
+        with console.status("创建合并后的自动化..."):
+            try:
+                new_id = automation_manager.create_automation(merged_config)
+                rprint(f"[green]  合并创建成功（ID: {new_id}）[/green]")
+            except Exception as e:
+                rprint(f"[red]  合并创建失败：{e}，跳过删除旧自动化[/red]")
+                continue
+        for old_id in ids_to_delete:
+            try:
+                automation_manager.delete_automation(old_id)
+                rprint(f"[dim]  已删除旧自动化：{old_id}[/dim]")
+            except Exception as e:
+                rprint(f"[yellow]  删除旧自动化失败（{old_id}）：{e}[/yellow]")
+
+    # 执行修复
+    for item in confirmed_fixes:
+        fix_id: str = item.get("id", "")
+        fixed_config = normalize_automation(item["_parsed"])
+        with console.status(f"更新 {item.get('alias', fix_id)}..."):
+            try:
+                automation_manager.update_automation(fix_id, fixed_config)
+                rprint(f"[green]  {item.get('alias', fix_id)} 修复成功[/green]")
+            except Exception as e:
+                rprint(f"[red]  修复失败（{fix_id}）：{e}[/red]")
+
+    # Reload
+    with console.status("重载自动化配置..."):
+        automation_manager.reload_automations()
+
+    rprint("[green]整合完成！[/green]")
 
 
 # ------------------------------------------------------------------

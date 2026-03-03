@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** create 核心功能已完善（两步 LLM 流程 + 追问修改循环），待完善 update/backup/restore，再封装为 HA Custom Component。
+**开发阶段：** create 核心功能已完善（两步 LLM 流程 + 追问修改循环 + description 详细注释）；optimize（单条优化）和 consolidate（批量整合）已实现；最终封装为 HA Custom Component。
 
 ---
 
@@ -242,8 +242,11 @@ normalize → validate → 备份 → create_automation → reload
 
 ### 提示词构建（`knowledge/prompts.py`）
 
-- `build_system_prompt(docs, entities, visible_domains)` — Step 2 YAML 生成提示词
-- `build_feasibility_prompt(entities, visible_domains)` — Step 1 可行性检查提示词
+- `build_system_prompt(docs, entities, visible_domains)` — create/update Step 2 YAML 生成提示词
+- `build_feasibility_prompt(entities, visible_domains)` — create Step 1 可行性检查提示词
+- `build_optimize_analysis_prompt(automation_yaml, entities, visible_domains)` — optimize Step 1 分析意图，返回 JSON `{intent, related_entities, issues, suggestions}`
+- `build_optimize_yaml_prompt(automation_yaml, analysis, entities, docs, visible_domains)` — optimize Step 2 生成优化 YAML
+- `build_consolidate_prompt(automations_data, entities, visible_domains)` — consolidate 批量分析，返回 JSON `{merge_groups, fix_items, ok_items}`
 - `DEFAULT_VISIBLE_DOMAINS` — 默认可见域集合（可被 config.domains 覆盖）
 - 文档最多 12000 字符，实体最多 150 条（全局实体优先，不受截断影响）
 
@@ -279,6 +282,8 @@ python3 main.py list-entities [--domain light] [--search 关键字]
 python3 main.py list-automations              # 列出所有自动化
 python3 main.py create "需求描述" [--dry-run] [--no-docs]
 python3 main.py update --id <automation_id>   # AI 修改已有自动化
+python3 main.py optimize [--id <automation_id>]  # 单条自动化 AI 优化（两步分析+追问修改）
+python3 main.py consolidate [--dry-run]          # 多条自动化批量整合（合并重复、纠正错误）
 python3 main.py refresh-docs [--list]         # 刷新/查看文档缓存
 python3 main.py backup list
 python3 main.py backup create
@@ -314,16 +319,91 @@ python3 main.py backup restore [--file <path>]
 
 ---
 
-## 十、已知问题 / 待调试
+## 十、命令实现详情
+
+### 单条自动化优化（`optimize` 命令）
+
+**功能目标**：选择一条已有自动化，让 LLM 理解其意图并进行优化，支持追问修改后写回 HA。
+
+**完整流程**：
+
+```
+1. 列出所有自动化 → 用户选择目标（交互式菜单 or --id 参数）
+2. GET /api/config/automation/config/{id} 获取完整配置
+   + get_entities(config) 获取当前实体列表
+3. LLM Step 1：理解意图（build_optimize_analysis_prompt）
+   - 传入：自动化完整 YAML + 实体列表
+   - 输出 JSON：{intent, related_entities, issues, suggestions}
+     - intent: 对当前自动化功能的自然语言描述
+     - related_entities: 当前涉及实体列表
+     - issues: 发现的问题（缺少 description / 逻辑不完整 / 幻觉实体等）
+     - suggestions: 优化建议列表
+4. 展示分析报告，询问用户是否继续生成优化配置
+5. LLM Step 2：生成优化后的完整 YAML（build_optimize_yaml_prompt）
+   - 优化方向（根据意图自动判断）：
+     - 补充/完善 description 字段
+     - 补充同意图相关的同类设备（如"离家节能"只关了客厅灯，可补充其他区域灯/空调等）
+     - 修正幻觉 entity_id（引用了不存在的实体）
+     - 完善 conditions（时间段限制、人员在家判断等）
+     - 统一字段格式到 HA 2024+ 规范
+6. 交互式追问修改循环（同 create 命令：输入意见→LLM重新生成→循环）
+7. 用户确认 → 备份 → POST /api/config/automation/config/{id} 写回
+```
+
+**提示词**：
+- `build_optimize_analysis_prompt(automation_yaml, entities, visible_domains)` → JSON 分析
+- `build_optimize_yaml_prompt(automation_yaml, analysis, entities, docs, visible_domains)` → 优化 YAML
+
+---
+
+### 多条自动化批量整合（`consolidate` 命令）
+
+**功能目标**：分析当前全部自动化，发现可合并的重复项和逻辑错误，输出优化方案供用户逐条确认后执行。
+
+**完整流程**：
+
+```
+1. list_automations() 获取所有自动化摘要
+2. 批量 GET /api/config/automation/config/{id} 获取全量完整配置
+   （跳过 id 为空或 "new" 的无效条目）
+   + get_entities(config) 获取实体列表
+3. LLM 单次分析（build_consolidate_prompt，传入全部 YAML + 实体列表）
+   输出 JSON：
+   {
+     "merge_groups": [
+       {"ids": [...], "aliases": [...], "reason": "...", "merged_yaml": "..."}
+     ],
+     "fix_items": [
+       {"id": "...", "alias": "...", "issue": "...", "fixed_yaml": "..."}
+     ],
+     "ok_items": [{"id": "...", "alias": "..."}]
+   }
+4. 格式化展示整合方案（合并组/修复项/无需变动数量）
+5. 逐条展示 YAML → 用户确认（直接回车接受 / 输入修改意见 / 输入 s 跳过）
+6. 追问修改循环（同 create 命令）
+7. 执行前整体备份 →
+   - 合并：先 create 新自动化，确认成功后 delete 旧自动化
+   - 纠错：update 对应自动化
+   - reload automations
+```
+
+**注意事项**：
+- 自动化 YAML 总量超过约 40000 字符时自动截断，优先保留前 N 条
+- 合并必须先确认新自动化写入成功才删除旧的
+- `--dry-run` 模式只展示方案，不执行写入/删除
+
+---
+
+## 十一、已知问题 / 待调试
 
 - [ ] `update` 命令：`POST /{id}` 写入内容是否正确持久化（待验证）
-- [ ] `list-automations`：通过 states 获取的 id 部分为 `"new"`，影响 update 时选择目标
+- [ ] `list-automations`：通过 states 获取的 id 部分为 `"new"`，影响 update/optimize 时选择目标（consolidate 已自动跳过）
 - [ ] `backup restore`：逐条恢复流程完整性验证
 - [ ] 整体端到端回归测试
 
 ---
 
-## 十一、后续封装为 HA 插件规划
+## 十二、后续封装为 HA 插件规划
 
 1. 将核心逻辑提取为独立 Python 包
 2. 创建 `custom_components/ha_llm_automation/` 目录
@@ -334,7 +414,7 @@ python3 main.py backup restore [--file <path>]
 
 ---
 
-## 十二、快速开始
+## 十三、快速开始
 
 ```bash
 # 1. 安装依赖
