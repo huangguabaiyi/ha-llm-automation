@@ -1,6 +1,7 @@
 """
 HA 自动化大模型创建工具 — CLI 入口
 """
+from __future__ import annotations
 
 import json
 import re
@@ -18,8 +19,8 @@ from rich.table import Table
 from backup.manager import BackupManager
 from ha_client.automations import (AutomationManager, extract_action_services,
                                     extract_entity_ids, extract_yaml_from_text,
-                                    normalize_automation, unwrap_automation,
-                                    validate_automation)
+                                    normalize_automation, parse_automations_from_text,
+                                    unwrap_automation, validate_automation)
 from ha_client.connection import HAConnection, load_config
 from ha_client.entities import (EntityManager, enrich_entities_with_areas,
                                  fetch_registry_data)
@@ -48,22 +49,27 @@ def main_callback(ctx: typer.Context):
     if ctx.invoked_subcommand is not None:
         return  # 有子命令时交给子命令处理
 
-    rprint(Panel(
-        "[bold]HA 自动化大模型工具[/bold]\n\n"
-        "  [cyan]1. 创建[/cyan]  — 用自然语言描述，AI 生成新自动化\n"
-        "  [cyan]2. 优化[/cyan]  — 分析并优化单条已有自动化\n"
-        "  [cyan]3. 聚合[/cyan]  — 批量整合所有自动化（合并重复、纠正错误）",
-        title="请选择模式", border_style="blue",
-    ))
-    mode = input("\n> ").strip()
-    if mode == "1":
-        create()
-    elif mode == "2":
-        optimize()
-    elif mode == "3":
-        consolidate()
-    else:
-        rprint("[yellow]请输入 1、2 或 3[/yellow]")
+    while True:
+        rprint(Panel(
+            "[bold]HA 自动化大模型工具[/bold]\n\n"
+            "  [cyan]1. 创建[/cyan]  — 用自然语言描述，AI 生成新自动化\n"
+            "  [cyan]2. 优化[/cyan]  — 分析并优化单条已有自动化\n"
+            "  [cyan]3. 聚合[/cyan]  — 批量整合所有自动化（合并重复、纠正错误）\n\n"
+            "  输入 [bold]exit[/bold] 退出",
+            title="请选择模式", border_style="blue",
+        ))
+        mode = input("\n> ").strip()
+        if mode == "exit":
+            rprint("[dim]已退出。[/dim]")
+            break
+        elif mode == "1":
+            create()
+        elif mode == "2":
+            optimize()
+        elif mode == "3":
+            consolidate()
+        else:
+            rprint("[yellow]请输入 1、2、3 或 exit[/yellow]")
 
 
 # ------------------------------------------------------------------
@@ -387,121 +393,198 @@ def create(
             rprint(f"[red]LLM 调用失败（Step 2）：{e}[/red]")
             raise typer.Exit(1)
 
-    # 提取并校验 YAML
-    yaml_str = extract_yaml_from_text(response)
-
-    # 检查 LLM 是否返回了 YAML（而不是纯文字说明）
-    parsed = yaml.safe_load(yaml_str)
-    if not isinstance(parsed, dict):
-        rprint("\n[yellow]AI 未能生成 YAML，返回了说明信息：[/yellow]")
+    # 解析 LLM 响应（支持单条/多条自动化）
+    automations_list = parse_automations_from_text(response)
+    if not automations_list:
+        rprint("\n[yellow]AI 未能生成有效的自动化 YAML，返回了说明信息：[/yellow]")
         rprint(Panel(response, title="AI 回复", border_style="yellow"))
         raise typer.Exit(1)
 
-    # ------------------------------------------------------------------
-    # 交互式修改循环：展示 YAML → 用户确认或提修改意见 → 循环直到满意
-    # ------------------------------------------------------------------
     valid_ids = {e["entity_id"] for e in entities} if entities else set()
-
-    while True:
-        rprint("\n[bold]生成的自动化配置：[/bold]")
-        rprint(Panel(yaml_str, title="YAML", border_style="green"))
-
-        # 解析校验
-        try:
-            auto_config = unwrap_automation(parsed)
-            validate_automation(auto_config)
-        except Exception as e:
-            rprint(f"[red]YAML 校验失败：{e}，请输入修改意见重新生成[/red]")
-            auto_config = None
-
-        # 实体 ID 合法性校验
-        if auto_config and valid_ids:
-            used_ids = extract_entity_ids(auto_config)
-            invalid_ids = used_ids - valid_ids
-            if invalid_ids:
-                rprint("[yellow]警告：以下实体 ID 在 HA 中不存在（可能是 LLM 编造）：[/yellow]")
-                for eid in sorted(invalid_ids):
-                    rprint(f"  [red]  - {eid}[/red]")
-
-            bad_actions = extract_action_services(auto_config) & valid_ids
-            if bad_actions:
-                rprint("[red]错误：以下 action 字段填写了实体 ID 而非服务名：[/red]")
-                for a in sorted(bad_actions):
-                    rprint(f"  [red]  - {a}[/red]")
-                auto_config = None  # 强制修改
-
-        # 提示用户输入修改意见
-        rprint("\n[dim]输入修改意见后回车让 AI 重新生成；直接回车接受当前配置[/dim]")
-        feedback = input("> ").strip()
-
-        if not feedback:
-            if auto_config is None:
-                rprint("[yellow]当前配置存在问题，请先输入修改意见[/yellow]")
-                continue
-            break  # 用户满意，退出循环
-
-        # 用户有修改意见 → 调用 LLM 重新生成
-        modify_msg = f"""请修改以下 Home Assistant 自动化配置：
-
-当前配置：
-```yaml
-{yaml_str}
-```
-
-修改要求：{feedback}
-
-请输出修改后的完整 YAML 配置。"""
-
-        with console.status("AI 修改中..."):
-            try:
-                response = llm.chat_with_retry(
-                    messages=[{"role": "user", "content": modify_msg}],
-                    system=system_prompt,
-                )
-            except Exception as e:
-                rprint(f"[red]LLM 调用失败：{e}[/red]")
-                continue
-
-        yaml_str = extract_yaml_from_text(response)
-        parsed = yaml.safe_load(yaml_str)
-        if not isinstance(parsed, dict):
-            rprint("[yellow]AI 未能生成 YAML，请重新描述修改意见[/yellow]")
-            rprint(Panel(response, title="AI 回复", border_style="yellow"))
-            continue
-
-    if dry_run:
-        rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
-        raise typer.Exit()
-
-    # 确认写入
-    if not typer.confirm("\n是否将此自动化写入 Home Assistant？"):
-        rprint("[yellow]已取消[/yellow]")
-        raise typer.Exit()
-
-    # 备份 + 写入
-    auto_config = normalize_automation(auto_config)
     automation_manager = get_automation_manager(config)
     backup_manager = get_backup_manager(config)
 
-    with console.status("备份现有自动化..."):
-        try:
-            existing = automation_manager.list_automations()
-            backup_file = backup_manager.create_backup(existing)
-            rprint(f"[dim]备份已保存：{backup_file}[/dim]")
-        except Exception as e:
-            rprint(f"[yellow]备份失败（{e}），是否仍要继续写入？[/yellow]")
-            if not typer.confirm("继续？", default=False):
-                raise typer.Exit()
+    # ------------------------------------------------------------------
+    # 单条：交互式修改循环
+    # ------------------------------------------------------------------
+    if len(automations_list) == 1:
+        parsed = automations_list[0]
+        yaml_str = yaml.dump(parsed, allow_unicode=True, sort_keys=False, default_flow_style=False)
 
-    with console.status("写入 Home Assistant..."):
-        try:
-            new_id = automation_manager.create_automation(auto_config)
-            automation_manager.reload_automations()
-        except Exception as e:
-            rprint(f"[red]写入失败：{e}[/red]")
-            raise typer.Exit(1)
+        while True:
+            rprint("\n[bold]生成的自动化配置：[/bold]")
+            rprint(Panel(yaml_str, title="YAML", border_style="green"))
 
-    rprint(f"[green]自动化创建成功！ID：{new_id}[/green]")
+            try:
+                auto_config = unwrap_automation(parsed)
+                validate_automation(auto_config)
+            except Exception as e:
+                rprint(f"[red]YAML 校验失败：{e}，请输入修改意见重新生成[/red]")
+                auto_config = None
+
+            if auto_config and valid_ids:
+                used_ids = extract_entity_ids(auto_config)
+                invalid_ids = used_ids - valid_ids
+                if invalid_ids:
+                    rprint("[yellow]警告：以下实体 ID 在 HA 中不存在（可能是 LLM 编造）：[/yellow]")
+                    for eid in sorted(invalid_ids):
+                        rprint(f"  [red]  - {eid}[/red]")
+                bad_actions = extract_action_services(auto_config) & valid_ids
+                if bad_actions:
+                    rprint("[red]错误：以下 action 字段填写了实体 ID 而非服务名：[/red]")
+                    for a in sorted(bad_actions):
+                        rprint(f"  [red]  - {a}[/red]")
+                    auto_config = None
+
+            rprint("\n[dim]输入修改意见后回车让 AI 重新生成；直接回车接受当前配置[/dim]")
+            feedback = input("> ").strip()
+
+            if not feedback:
+                if auto_config is None:
+                    rprint("[yellow]当前配置存在问题，请先输入修改意见[/yellow]")
+                    continue
+                break
+
+            modify_msg = (
+                f"请修改以下 Home Assistant 自动化配置：\n\n"
+                f"当前配置：\n```yaml\n{yaml_str}\n```\n\n"
+                f"修改要求：{feedback}\n\n请输出修改后的完整 YAML 配置。"
+            )
+            with console.status("AI 修改中..."):
+                try:
+                    response = llm.chat_with_retry(
+                        messages=[{"role": "user", "content": modify_msg}],
+                        system=system_prompt,
+                    )
+                except Exception as e:
+                    rprint(f"[red]LLM 调用失败：{e}[/red]")
+                    continue
+
+            new_list = parse_automations_from_text(response)
+            if not new_list:
+                rprint("[yellow]AI 未能生成 YAML，请重新描述修改意见[/yellow]")
+                rprint(Panel(response, title="AI 回复", border_style="yellow"))
+                continue
+            parsed = new_list[0]
+            yaml_str = yaml.dump(parsed, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+        if dry_run:
+            rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
+            raise typer.Exit()
+
+        if not typer.confirm("\n是否将此自动化写入 Home Assistant？"):
+            rprint("[yellow]已取消[/yellow]")
+            raise typer.Exit()
+
+        auto_config = normalize_automation(auto_config)
+        with console.status("备份现有自动化..."):
+            try:
+                existing = automation_manager.list_automations()
+                backup_file = backup_manager.create_backup(existing)
+                rprint(f"[dim]备份已保存：{backup_file}[/dim]")
+            except Exception as e:
+                rprint(f"[yellow]备份失败（{e}），是否仍要继续写入？[/yellow]")
+                if not typer.confirm("继续？", default=False):
+                    raise typer.Exit()
+
+        with console.status("写入 Home Assistant..."):
+            try:
+                new_id = automation_manager.create_automation(auto_config)
+                automation_manager.reload_automations()
+            except Exception as e:
+                rprint(f"[red]写入失败：{e}[/red]")
+                raise typer.Exit(1)
+
+        rprint(f"[green]自动化创建成功！ID：{new_id}[/green]")
+
+    # ------------------------------------------------------------------
+    # 多条：批量预览 + 确认写入
+    # ------------------------------------------------------------------
+    else:
+        n = len(automations_list)
+        rprint(f"\n[bold]AI 生成了 {n} 条自动化：[/bold]")
+
+        # 逐条展示 + 校验
+        configs: list[dict | None] = []
+        for i, item in enumerate(automations_list, 1):
+            alias = item.get("alias", f"automation_{i}")
+            yaml_preview = yaml.dump(item, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            warnings: list[str] = []
+            try:
+                cfg = unwrap_automation(item)
+                validate_automation(cfg)
+            except Exception as e:
+                warnings.append(f"[red]校验失败：{e}[/red]")
+                cfg = None
+            if cfg and valid_ids:
+                invalid_ids = extract_entity_ids(cfg) - valid_ids
+                if invalid_ids:
+                    warnings.append(f"[yellow]幻觉实体：{', '.join(sorted(invalid_ids))}[/yellow]")
+                bad_actions = extract_action_services(cfg) & valid_ids
+                if bad_actions:
+                    warnings.append(f"[red]action 字段错误（填了实体 ID）：{', '.join(sorted(bad_actions))}[/red]")
+                    cfg = None
+            border = "yellow" if warnings else "green"
+            title = f"[{i}/{n}] {alias}" + (" [yellow]⚠ 有问题[/yellow]" if warnings else "")
+            rprint(Panel(yaml_preview, title=title, border_style=border))
+            for w in warnings:
+                rprint(f"  {w}")
+            configs.append(cfg)
+
+        if dry_run:
+            rprint("[yellow]--dry-run 模式，不写入 HA[/yellow]")
+            raise typer.Exit()
+
+        valid_count = sum(1 for c in configs if c is not None)
+        rprint(f"\n共 [bold]{n}[/bold] 条，其中 [green]{valid_count}[/green] 条可写入。")
+        rprint("[dim]直接回车全部写入；输入要跳过的编号（如 2,5）；输入 q 取消[/dim]")
+        ans = input("> ").strip().lower()
+
+        if ans == "q":
+            rprint("[yellow]已取消[/yellow]")
+            raise typer.Exit()
+
+        skip_indices: set[int] = set()
+        if ans:
+            try:
+                skip_indices = {int(x.strip()) for x in ans.split(",") if x.strip()}
+            except ValueError:
+                rprint("[yellow]输入格式有误，视为不跳过任何条目[/yellow]")
+
+        to_create = [
+            normalize_automation(cfg)
+            for i, cfg in enumerate(configs, 1)
+            if cfg is not None and i not in skip_indices
+        ]
+
+        if not to_create:
+            rprint("[yellow]没有可创建的自动化[/yellow]")
+            raise typer.Exit()
+
+        with console.status("备份现有自动化..."):
+            try:
+                existing = automation_manager.list_automations()
+                backup_file = backup_manager.create_backup(existing)
+                rprint(f"[dim]备份已保存：{backup_file}[/dim]")
+            except Exception as e:
+                rprint(f"[yellow]备份失败（{e}），是否仍要继续写入？[/yellow]")
+                if not typer.confirm("继续？", default=False):
+                    raise typer.Exit()
+
+        success, failed = 0, 0
+        for i, cfg in enumerate(to_create, 1):
+            alias = cfg.get("alias", f"automation_{i}")
+            with console.status(f"[{i}/{len(to_create)}] 写入 {alias}..."):
+                try:
+                    new_id = automation_manager.create_automation(cfg)
+                    rprint(f"[green]  [{i}/{len(to_create)}] {alias} → 成功（ID: {new_id}）[/green]")
+                    success += 1
+                except Exception as e:
+                    rprint(f"[red]  [{i}/{len(to_create)}] {alias} → 失败：{e}[/red]")
+                    failed += 1
+
+        fail_str = f"，[red]{failed} 失败[/red]" if failed else ""
+        rprint(f"\n[bold]批量创建完成：[green]{success} 成功[/green]{fail_str}[/bold]")
 
 
 # ------------------------------------------------------------------

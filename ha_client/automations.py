@@ -198,6 +198,46 @@ def extract_yaml_from_text(text: str) -> str:
     return text.strip()
 
 
+def parse_automations_from_text(text: str) -> list[dict]:
+    """
+    从 LLM 响应文本中提取并解析所有自动化配置，返回 list[dict]。
+    支持以下 LLM 输出格式：
+    - 单个 dict（单条自动化）
+    - list[dict]（多条自动化写在同一个 YAML 块里）
+    - 多个独立 ```yaml``` 代码块（每块一条）
+    - automation: dict/list 顶层包装
+    """
+    pattern = r"```(?:yaml)?\s*\n(.*?)```"
+    blocks = re.findall(pattern, text, re.DOTALL)
+    if not blocks:
+        blocks = [text.strip()]
+
+    results: list[dict] = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        try:
+            for doc in yaml.safe_load_all(block):
+                if doc is None:
+                    continue
+                if isinstance(doc, list):
+                    for item in doc:
+                        if isinstance(item, dict):
+                            results.append(unwrap_automation(item))
+                elif isinstance(doc, dict):
+                    # automation: [list] 包装
+                    if list(doc.keys()) == ["automation"] and isinstance(doc["automation"], list):
+                        for item in doc["automation"]:
+                            if isinstance(item, dict):
+                                results.append(item)
+                    else:
+                        results.append(unwrap_automation(doc))
+        except Exception:
+            continue
+    return results
+
+
 def extract_action_services(config: dict) -> set[str]:
     """
     递归提取 actions 中所有 action/service 字段值（即 service call 名称）。
