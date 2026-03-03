@@ -9,3 +9,4 @@ backup/archives/
 knowledge/cache/
 *.log
 .DS_Store
+.claude/
