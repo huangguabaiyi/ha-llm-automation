@@ -33,12 +33,37 @@ app = typer.Typer(
     name="ha-llm",
     help="Home Assistant 自动化大模型创建工具",
     add_completion=False,
+    invoke_without_command=True,
 )
 backup_app = typer.Typer(help="备份管理命令")
 app.add_typer(backup_app, name="backup")
 
 console = Console()
 CONFIG_PATH = "config.json"
+
+
+@app.callback(invoke_without_command=True)
+def main_callback(ctx: typer.Context):
+    """直接运行进入交互式模式选择"""
+    if ctx.invoked_subcommand is not None:
+        return  # 有子命令时交给子命令处理
+
+    rprint(Panel(
+        "[bold]HA 自动化大模型工具[/bold]\n\n"
+        "  [cyan]1. 创建[/cyan]  — 用自然语言描述，AI 生成新自动化\n"
+        "  [cyan]2. 优化[/cyan]  — 分析并优化单条已有自动化\n"
+        "  [cyan]3. 聚合[/cyan]  — 批量整合所有自动化（合并重复、纠正错误）",
+        title="请选择模式", border_style="blue",
+    ))
+    mode = input("\n> ").strip()
+    if mode == "1":
+        create()
+    elif mode == "2":
+        optimize()
+    elif mode == "3":
+        consolidate()
+    else:
+        rprint("[yellow]请输入 1、2 或 3[/yellow]")
 
 
 # ------------------------------------------------------------------
@@ -643,27 +668,44 @@ def optimize(
     config = get_config()
     automation_manager = get_automation_manager(config)
 
-    # Step 1：选择自动化
+    # Step 1：选择自动化（只列出能获取完整配置的）
     if not automation_id:
-        with console.status("获取自动化列表..."):
-            automations = automation_manager.list_automations()
-        if not automations:
-            rprint("[yellow]当前没有任何自动化[/yellow]")
+        with console.status("获取自动化列表（探测可访问性...）"):
+            all_automations = automation_manager.list_automations()
+            # 过滤出能 GET 到完整配置的（排除旧 YAML 配置、无效 ID 等）
+            accessible = []
+            for a in all_automations:
+                aid = a.get("id", "")
+                if not aid or aid == "new":
+                    continue
+                try:
+                    automation_manager.get_automation(aid)
+                    accessible.append(a)
+                except Exception:
+                    pass
+        if not accessible:
+            rprint("[yellow]没有可优化的自动化（所有自动化均无法通过 API 获取完整配置）[/yellow]")
+            rprint("[dim]提示：只有通过本工具或 HA UI 创建的自动化才支持优化[/dim]")
             raise typer.Exit()
-        rprint("\n[bold]当前自动化列表：[/bold]")
-        for i, a in enumerate(automations, 1):
+        rprint(f"\n[bold]可优化的自动化（共 {len(accessible)} 条）：[/bold]")
+        for i, a in enumerate(accessible, 1):
             rprint(f"  {i}. [dim][{a['id']}][/dim] {a['alias']}")
         idx_str = typer.prompt("输入序号选择要优化的自动化")
         try:
             idx = int(idx_str) - 1
-            automation_id = automations[idx]["id"]
+            automation_id = accessible[idx]["id"]
         except (ValueError, IndexError):
             rprint("[red]无效序号[/red]")
             raise typer.Exit(1)
 
     # 获取完整配置
     with console.status("获取自动化配置..."):
-        current = automation_manager.get_automation(automation_id)
+        try:
+            current = automation_manager.get_automation(automation_id)
+        except Exception as e:
+            rprint(f"[red]无法获取自动化配置：{e}[/red]")
+            rprint("[dim]提示：只有通过本工具或 HA UI 创建的自动化才支持优化[/dim]")
+            raise typer.Exit(1)
     current_yaml = automation_manager.to_yaml(current)
     rprint(f"\n[bold]当前配置（{current.get('alias', automation_id)}）：[/bold]")
     rprint(Panel(current_yaml, title="原始 YAML", border_style="blue"))
