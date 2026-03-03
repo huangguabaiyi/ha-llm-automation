@@ -80,7 +80,7 @@ mode: single
   - 有条件判断时：`trigger -> condition check -> action`
   - 示例：`description: "Every day at 22:00 -> turn off all living room lights"`
   - 示例：`description: "Living room occupied -> turn on lights"`
-  - 【注意】HA 配置 API 不接受非 ASCII 字符，description 必须全英文；YAML # 注释写入时丢弃，无需添加
+  - 【严格要求】只能使用 ASCII 字符，箭头必须用 `->` 而非 `→`（Unicode 箭头会导致写入失败）
 
 ### 实体选择规则：
 - **只能使用上方实体列表中出现的 entity_id**，禁止编造不存在的实体

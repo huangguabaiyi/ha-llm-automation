@@ -154,10 +154,17 @@ def normalize_automation(config: dict) -> dict:
     if "alias" in out:
         out["alias"] = _to_ascii_alias(str(out["alias"]))
 
-    # description 含非 ASCII -> 清空（HA 配置 API 服务端不接受非 ASCII 字符）
+    # description 含非 ASCII -> 替换常见 Unicode 符号为 ASCII 等价，再移除剩余非 ASCII
     # 不存在时补空字符串（HA 必须有此字段才能保存 triggers/actions）
-    if out.get("description") and not out["description"].isascii():
-        out["description"] = ""
+    if "description" in out and out["description"]:
+        desc = out["description"]
+        _UNICODE_REPLACEMENTS = {"→": "->", "←": "<-", "↑": "^", "↓": "v",
+                                  "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'}
+        for uc, asc in _UNICODE_REPLACEMENTS.items():
+            desc = desc.replace(uc, asc)
+        # 移除剩余非 ASCII 字符
+        desc = "".join(c for c in desc if ord(c) < 128).strip()
+        out["description"] = desc
     if "description" not in out:
         out["description"] = ""
 
