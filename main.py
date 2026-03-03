@@ -1069,7 +1069,8 @@ def consolidate(
         rprint(f"\n[bold cyan]可合并的自动化组（{len(merge_groups)} 组）：[/bold cyan]")
         for i, g in enumerate(merge_groups, 1):
             names = " + ".join(g.get("aliases") or g.get("ids") or [])
-            rprint(f"  {i}. {names}")
+            scenario = g.get("scenario", "")
+            rprint(f"  {i}. {names}" + (f"  [cyan]【{scenario}】[/cyan]" if scenario else ""))
             rprint(f"     原因：{g.get('reason', '')}")
 
     if fix_items:
@@ -1154,7 +1155,11 @@ def consolidate(
     confirmed_merges: list[dict] = []
     for i, group in enumerate(merge_groups, 1):
         names = " + ".join(group.get("aliases") or group.get("ids") or [])
-        rprint(f"\n[bold]合并方案 {i}/{len(merge_groups)}：{names}[/bold]")
+        scenario = group.get("scenario", "")
+        header = f"\n[bold]合并方案 {i}/{len(merge_groups)}：{names}[/bold]"
+        if scenario:
+            header += f"  [cyan]【{scenario}】[/cyan]"
+        rprint(header)
         rprint(f"原因：{group.get('reason', '')}")
         cfg = _review_yaml_loop(
             group.get("merged_yaml", ""), title="合并后的 YAML", border="green"
