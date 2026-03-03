@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** create 核心功能已完善（两步 LLM 流程 + 追问修改循环 + description 详细注释）；optimize（单条优化）和 consolidate（批量整合）已实现；最终封装为 HA Custom Component。
+**开发阶段：** 三大核心模式均已实现并通过端到端测试（create / optimize / consolidate）；统一交互入口（`python3 main.py`）已上线；最终封装为 HA Custom Component。
 
 ---
 
@@ -14,17 +14,16 @@
 ```
 HA自动化工具/
 ├── CLAUDE.md                  # 本文件，项目指南
-├── CLAUDE.md.bak              # 上一版本备份
 ├── config.json                # 本地配置（不提交 git）
 ├── config.example.json        # 配置模板
-├── main.py                    # 主入口 CLI（typer）
+├── main.py                    # 主入口 CLI（typer）；无参数时显示模式选择菜单
 ├── requirements.txt
 ├── ha_client/
 │   ├── __init__.py
 │   ├── connection.py          # HAConnection, load_config
 │   ├── entities.py            # EntityManager + fetch_registry_data
 │   ├── automations.py         # AutomationManager + 工具函数
-│   └── ws_client.py           # WebSocket 客户端
+│   └── ws_client.py           # WebSocket 客户端（区域/实体注册表）
 ├── llm_client/
 │   ├── __init__.py            # create_client() 工厂函数
 │   ├── base.py                # BaseLLMClient 抽象基类
@@ -32,7 +31,7 @@ HA自动化工具/
 │   └── anthropic_client.py    # Anthropic Claude 接口
 ├── knowledge/
 │   ├── fetcher.py             # DocFetcher（抓取+缓存，7天TTL）
-│   ├── prompts.py             # build_system_prompt() / build_feasibility_prompt()
+│   ├── prompts.py             # 所有提示词构建函数（5个）
 │   └── cache/                 # 文档本地缓存（已缓存7个HA官方文档）
 ├── backup/
 │   ├── manager.py             # BackupManager
@@ -160,11 +159,27 @@ get_entities(config) -> list[dict]
 |------|------|------|
 | **列出所有自动化** | `GET /api/config/automation/config` | ❌ 404（代理屏蔽）|
 | **改用** | `GET /api/states` 过滤 `automation.*` | ✅ |
-| 获取单条完整配置 | `GET /api/config/automation/config/{id}` | ✅ |
+| 获取单条完整配置 | `GET /api/config/automation/config/{id}` | ⚠️ 仅对「存储型」自动化有效（见下）|
 | **创建自动化** | `POST /api/config/automation/config/new` | ✅（有特殊要求，见下）|
 | **更新自动化** | `POST /api/config/automation/config/{id}` | ✅（非 PUT）|
 | 删除自动化 | `DELETE /api/config/automation/config/{id}` | ✅ |
 | 重载配置 | `POST /api/services/automation/reload` | ✅ |
+
+### ⚠️ 「存储型」vs「YAML型」自动化
+
+HA 中存在两类自动化：
+
+| 类型 | 存储位置 | GET 完整配置 | 说明 |
+|------|---------|------------|------|
+| **存储型** | HA `.storage/` | ✅ | 通过 HA UI 或本工具 REST API 创建 |
+| **YAML型** | `automations.yaml` | ❌ 404 | 手动在配置文件中定义 |
+
+`/api/states` 两类都会列出（包含 `attributes.id`），但 GET 完整配置只对存储型有效。
+`optimize` 和 `consolidate` 命令启动时自动探测并过滤，只展示可访问的自动化。
+
+#### 辨别方法
+- YAML 型：`attributes.restored = true, state = unavailable`（HA 重启后从 state DB 恢复）
+- 存储型：`state = on/off`，正常工作
 
 ### ⚠️ 创建自动化的三个必要条件
 
@@ -273,7 +288,27 @@ normalize → validate → 备份 → create_automation → reload
 
 ---
 
-## 八、CLI 命令速查
+## 八、使用入口与 CLI 命令速查
+
+### 统一交互入口（推荐）
+
+```bash
+python3 main.py
+```
+
+启动后显示模式选择菜单：
+```
+╭─ 请选择模式 ────────────────────────────────────────────────╮
+│ HA 自动化大模型工具                                         │
+│                                                             │
+│   1. 创建  — 用自然语言描述，AI 生成新自动化               │
+│   2. 优化  — 分析并优化单条已有自动化                      │
+│   3. 聚合  — 批量整合所有自动化（合并重复、纠正错误）      │
+╰─────────────────────────────────────────────────────────────╯
+>
+```
+
+### 直接子命令（调试/高级用法）
 
 ```bash
 python3 main.py init                          # 交互式初始化配置
@@ -282,8 +317,8 @@ python3 main.py list-entities [--domain light] [--search 关键字]
 python3 main.py list-automations              # 列出所有自动化
 python3 main.py create "需求描述" [--dry-run] [--no-docs]
 python3 main.py update --id <automation_id>   # AI 修改已有自动化
-python3 main.py optimize [--id <automation_id>]  # 单条自动化 AI 优化（两步分析+追问修改）
-python3 main.py consolidate [--dry-run]          # 多条自动化批量整合（合并重复、纠正错误）
+python3 main.py optimize [--id <automation_id>] [--dry-run]  # 单条自动化优化
+python3 main.py consolidate [--dry-run]       # 多条自动化批量整合
 python3 main.py refresh-docs [--list]         # 刷新/查看文档缓存
 python3 main.py backup list
 python3 main.py backup create
@@ -397,9 +432,10 @@ python3 main.py backup restore [--file <path>]
 ## 十一、已知问题 / 待调试
 
 - [ ] `update` 命令：`POST /{id}` 写入内容是否正确持久化（待验证）
-- [ ] `list-automations`：通过 states 获取的 id 部分为 `"new"`，影响 update/optimize 时选择目标（consolidate 已自动跳过）
+- [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
+- [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
+- [ ] consolidate 命令：尚未实测完整执行流程
 - [ ] `backup restore`：逐条恢复流程完整性验证
-- [ ] 整体端到端回归测试
 
 ---
 
