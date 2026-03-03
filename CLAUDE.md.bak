@@ -1,0 +1,356 @@
+# HA 自动化大模型创建工具 — 项目指南
+
+## 项目概述
+
+本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
+目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
+
+**开发阶段：** 先跑通 CLI 流程，再封装为 HA Custom Component。
+
+---
+
+## 项目结构
+
+```
+HA自动化工具/
+├── CLAUDE.md                  # 本文件，项目指南
+├── config.json                # 本地配置（不提交 git）
+├── config.example.json        # 配置模板
+├── main.py                    # 主入口 CLI
+├── ha_client/
+│   ├── __init__.py
+│   ├── connection.py          # HA 连接与认证
+│   ├── entities.py            # 实体与设备信息
+│   └── automations.py         # 自动化脚本读写
+├── llm_client/
+│   ├── __init__.py
+│   ├── base.py                # LLM 接口抽象基类
+│   ├── openai_client.py       # OpenAI / 兼容接口
+│   └── anthropic_client.py    # Anthropic Claude 接口
+├── knowledge/
+│   ├── fetcher.py             # 抓取 HA 官方文档
+│   ├── cache/                 # 文档本地缓存（json/md）
+│   └── prompts.py             # 系统提示词模板
+├── backup/
+│   ├── manager.py             # 备份管理
+│   └── archives/              # 备份文件存放
+└── tests/
+    └── test_*.py
+```
+
+---
+
+## 一、HA 连接配置
+
+### 配置文件格式（`config.json`）
+
+```json
+{
+  "ha": {
+    "url": "http://homeassistant.local:8123",
+    "token": "your_long_lived_access_token",
+    "verify_ssl": true,
+    "timeout": 30
+  },
+  "llm": {
+    "provider": "anthropic",
+    "api_key": "your_api_key",
+    "model": "claude-sonnet-4-6",
+    "base_url": null,
+    "max_tokens": 8192,
+    "temperature": 0.3
+  },
+  "backup": {
+    "max_versions": 10,
+    "backup_dir": "./backup/archives"
+  }
+}
+```
+
+### HA Long-Lived Access Token 获取方式
+
+1. 登录 Home Assistant Web UI
+2. 进入「个人资料」页（左下角头像）
+3. 滚动到底部「长期访问令牌」→ 创建令牌
+4. 复制令牌填入 `config.json` 的 `ha.token` 字段
+
+### 连接模块（`ha_client/connection.py`）
+
+- 使用 `httpx` 或 `aiohttp` 发送请求
+- 基础 URL：`{ha.url}/api/`
+- 认证头：`Authorization: Bearer {ha.token}`
+- 提供 `test_connection()` 方法验证连通性
+- 支持 HTTP 和 HTTPS，可关闭 SSL 验证（`verify_ssl: false`）
+
+---
+
+## 二、实体与设备信息
+
+### 功能说明
+
+- 获取所有实体列表：`GET /api/states`
+- 获取单个实体状态：`GET /api/states/{entity_id}`
+- 按 domain 过滤实体（如 `light`, `switch`, `sensor` 等）
+- 获取设备注册表：`GET /api/template`（模板渲染获取设备信息）
+- 获取区域（area）信息：通过 WebSocket API `config/area_registry/list`
+- 实体信息本地缓存，定期刷新（默认 5 分钟）
+
+### 关键数据结构
+
+```python
+# 实体摘要（用于传递给 LLM）
+EntitySummary = {
+    "entity_id": "light.living_room",
+    "friendly_name": "客厅灯",
+    "domain": "light",
+    "state": "on",
+    "attributes": { "brightness": 255, "color_temp": 4000 }
+}
+```
+
+### 实现要点（`ha_client/entities.py`）
+
+- `get_all_entities() -> list[EntitySummary]`：获取全量实体
+- `get_entities_by_domain(domain: str) -> list[EntitySummary]`：按域过滤
+- `search_entities(keyword: str) -> list[EntitySummary]`：按名称/ID 搜索
+- `get_entity_state(entity_id: str) -> dict`：获取单个实体详情
+- `refresh_cache()`：强制刷新本地缓存
+- 为 LLM 提供精简的实体摘要，避免传递冗余 attribute 数据
+
+---
+
+## 三、自动化脚本管理
+
+### HA 自动化 REST API
+
+```
+GET  /api/config/automation/config          # 获取所有自动化列表
+GET  /api/config/automation/config/{id}     # 获取单个自动化
+POST /api/config/automation/config          # 创建新自动化
+PUT  /api/config/automation/config/{id}     # 更新已有自动化
+DELETE /api/config/automation/config/{id}   # 删除自动化（谨慎使用）
+POST /api/services/automation/reload        # 重载自动化配置
+```
+
+### 自动化数据结构（YAML/JSON 双模式）
+
+```yaml
+alias: "每天早上开灯"
+description: "工作日早上7点自动打开客厅灯"
+trigger:
+  - platform: time
+    at: "07:00:00"
+condition:
+  - condition: time
+    weekday: [mon, tue, wed, thu, fri]
+action:
+  - service: light.turn_on
+    target:
+      entity_id: light.living_room
+    data:
+      brightness_pct: 80
+mode: single
+```
+
+### 实现要点（`ha_client/automations.py`）
+
+- `list_automations() -> list[dict]`：获取所有自动化摘要
+- `get_automation(automation_id: str) -> dict`：获取完整配置
+- `create_automation(config: dict) -> str`：创建并返回新 ID
+- `update_automation(automation_id: str, config: dict) -> bool`
+- `reload_automations() -> bool`：触发 HA 重载配置
+- **创建/更新前必须先备份**（调用 backup manager）
+- 对 LLM 生成的配置进行基础 schema 校验后再提交
+
+---
+
+## 四、HA 官方文档学习模块
+
+### 目标文档范围
+
+| 模块 | 官方文档 URL |
+|------|-------------|
+| 自动化基础 | https://www.home-assistant.io/docs/automation/ |
+| Trigger（触发器） | https://www.home-assistant.io/docs/automation/trigger/ |
+| Condition（条件） | https://www.home-assistant.io/docs/automation/condition/ |
+| Action（动作） | https://www.home-assistant.io/docs/automation/action/ |
+| 模板（Template） | https://www.home-assistant.io/docs/configuration/templating/ |
+| 脚本语法 | https://www.home-assistant.io/docs/scripts/ |
+| 服务调用 | https://www.home-assistant.io/docs/scripts/service-calls/ |
+
+### 实现要点（`knowledge/fetcher.py`）
+
+- 使用 `httpx` + `BeautifulSoup` 抓取文档 HTML，提取正文 Markdown
+- 文档抓取后缓存到 `knowledge/cache/` 目录（按 URL hash 命名）
+- 缓存有效期：7 天，过期自动重新抓取
+- 提供 `get_doc(url: str) -> str`：返回文档 Markdown 文本
+- 提供 `refresh_all_docs()`：批量刷新所有预设文档
+- 文档内容拼接到 System Prompt，帮助 LLM 生成合规的 HA 自动化配置
+
+### 文档用于提示词构建（`knowledge/prompts.py`）
+
+- `build_system_prompt(docs: list[str], entities: list[dict]) -> str`
+- System Prompt 包含：HA 自动化语法参考 + 当前可用实体列表
+- 控制 token 数量：文档摘要不超过 4000 tokens，实体列表不超过 2000 tokens
+
+---
+
+## 五、LLM API 接口配置
+
+### 支持的 Provider
+
+| Provider | model 示例 | base_url |
+|----------|-----------|---------|
+| Anthropic | `claude-sonnet-4-6`, `claude-opus-4-6` | 默认（不需填） |
+| OpenAI | `gpt-4o`, `gpt-4-turbo` | 默认（不需填） |
+| OpenAI 兼容 | 本地 Ollama、DeepSeek 等 | 需填写自定义 URL |
+
+### 配置项说明（`config.json` → `llm` 节点）
+
+```json
+{
+  "provider": "anthropic",       // anthropic | openai | openai_compatible
+  "api_key": "sk-...",
+  "model": "claude-sonnet-4-6",
+  "base_url": null,              // OpenAI 兼容模式时填写，如 http://localhost:11434/v1
+  "max_tokens": 8192,
+  "temperature": 0.3             // 自动化生成建议低温度，保证稳定性
+}
+```
+
+### LLM 接口抽象（`llm_client/base.py`）
+
+```python
+class BaseLLMClient:
+    def chat(self, messages: list[dict], system: str = "") -> str:
+        """发送对话请求，返回文本响应"""
+        raise NotImplementedError
+
+    def extract_yaml(self, response: str) -> str:
+        """从 LLM 响应中提取 YAML 代码块"""
+        ...
+```
+
+### 核心对话流程
+
+1. 用户输入自然语言需求
+2. 拉取相关实体列表 + HA 文档摘要
+3. 构建包含上下文的 System Prompt
+4. 调用 LLM 生成 YAML 自动化配置
+5. 提取并校验 YAML 格式
+6. 询问用户确认后写入 HA
+
+---
+
+## 六、备份管理
+
+### 备份策略
+
+- **每次写入 HA 自动化前自动备份**
+- 备份全量自动化配置到 `backup/archives/`
+- 文件命名：`automations_backup_{YYYYMMDD_HHMMSS}.json`
+- 保留最近 N 个版本（由 `backup.max_versions` 控制，默认 10）
+- 超过最大版本数时，自动删除最旧的备份
+
+### 实现要点（`backup/manager.py`）
+
+- `create_backup(automations: list[dict]) -> str`：创建备份，返回备份文件路径
+- `list_backups() -> list[str]`：列出所有备份文件（按时间倒序）
+- `restore_backup(backup_path: str) -> bool`：从备份文件恢复
+- `cleanup_old_backups()`：清理超出 max_versions 的旧备份
+
+---
+
+## 七、CLI 主流程（`main.py`）
+
+### 命令规划
+
+```bash
+# 测试 HA 连接
+python main.py test-connection
+
+# 刷新并显示实体列表
+python main.py list-entities [--domain light]
+
+# 列出所有自动化
+python main.py list-automations
+
+# 通过自然语言创建自动化（交互式）
+python main.py create
+
+# 更新现有自动化
+python main.py update --id automation.xxx
+
+# 刷新 HA 官方文档缓存
+python main.py refresh-docs
+
+# 查看/恢复备份
+python main.py backup list
+python main.py backup restore --file backup_20260303_120000.json
+
+# 配置初始化向导
+python main.py init
+```
+
+---
+
+## 八、开发规范
+
+### 技术栈
+
+- **Python 3.11+**
+- `httpx`：HTTP 客户端（异步优先）
+- `anthropic`：Anthropic SDK
+- `openai`：OpenAI SDK（兼容模式）
+- `pyyaml`：YAML 解析与生成
+- `beautifulsoup4` + `markdownify`：文档抓取与转换
+- `rich`：CLI 美化输出
+- `typer`：CLI 框架
+
+### 安全原则
+
+- `config.json` 加入 `.gitignore`，不提交任何 token/key
+- 删除自动化操作需二次确认，默认不开放删除功能
+- LLM 生成的配置必须经过 schema 校验才能写入 HA
+- 写入前自动备份，确保可回滚
+
+### 错误处理
+
+- HA 连接失败：提示检查 URL/Token，不崩溃
+- LLM 返回非法 YAML：重试最多 2 次，仍失败则展示原始输出让用户手动处理
+- 文档抓取失败：使用缓存降级，记录警告
+
+---
+
+## 九、后续封装为 HA 插件规划
+
+当 CLI 流程跑通后，按以下步骤封装：
+
+1. 将核心逻辑提取为独立 Python 包
+2. 创建 `custom_components/ha_llm_automation/` 目录结构
+3. 实现 `config_flow.py`（UI 配置向导）
+4. 实现 `conversation.py` 或 `service.py` 暴露 HA 服务
+5. 在 HA 中注册为对话代理（Conversation Agent）
+6. 编写 `manifest.json` 和 `strings.json`
+
+---
+
+## 十、快速开始
+
+```bash
+# 1. 安装依赖
+pip install httpx anthropic openai pyyaml beautifulsoup4 markdownify rich typer
+
+# 2. 复制并编辑配置
+cp config.example.json config.json
+# 填写 ha.url, ha.token, llm.api_key
+
+# 3. 测试连接
+python main.py test-connection
+
+# 4. 刷新文档缓存
+python main.py refresh-docs
+
+# 5. 开始创建自动化
+python main.py create
+```
