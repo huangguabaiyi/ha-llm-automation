@@ -1215,21 +1215,61 @@ def consolidate(
             if not typer.confirm("继续？", default=False):
                 raise typer.Exit()
 
+    def _llm_fix_yaml(current_parsed: dict, ha_error: str) -> dict | None:
+        """把 HA 报错反馈给 LLM，让它修复 YAML，返回修复后的 dict 或 None"""
+        yaml_str = yaml.dump(current_parsed, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        fix_msg = (
+            f"以下 Home Assistant 自动化 YAML 写入失败，HA 返回错误：\n\n"
+            f"错误信息：{ha_error}\n\n"
+            f"当前配置：\n```yaml\n{yaml_str}\n```\n\n"
+            f"请根据错误信息修复这个 YAML 配置，输出修复后的完整配置。\n"
+            f"常见修复方向：\n"
+            f"- choose 块内的 conditions 必须用 condition: 语法，不能用 trigger 专属的 at:\n"
+            f"- 时间条件要用 condition: time, after:/before:，不是 at:\n"
+            f"- 所有字段名必须符合 HA 2024+ 规范（triggers/conditions/actions）"
+        )
+        with console.status("AI 修复 YAML 中..."):
+            try:
+                fix_resp = llm.chat_with_retry(
+                    messages=[{"role": "user", "content": fix_msg}],
+                    system=system_prompt,
+                )
+            except Exception as llm_e:
+                rprint(f"[red]  LLM 调用失败：{llm_e}[/red]")
+                return None
+        new_list = parse_automations_from_text(fix_resp)
+        return new_list[0] if new_list else None
+
     # 执行合并（先 create 成功再 delete）
     for group in confirmed_merges:
         ids_to_delete: list[str] = group.get("ids") or []
-        merged_config = normalize_automation(group["_parsed"])
-        with console.status("创建合并后的自动化..."):
-            try:
-                new_id = automation_manager.create_automation(merged_config)
-                rprint(f"[green]  合并创建成功（ID: {new_id}）[/green]")
-            except Exception as e:
-                rprint(f"[red]  合并创建失败：{e}[/red]")
-                rprint("[dim]  发送的 payload 预览（供排查）：[/dim]")
-                preview = yaml.dump(merged_config, allow_unicode=True, sort_keys=False, default_flow_style=False)
-                rprint(Panel(preview[:1000], title="payload", border_style="red"))
-                rprint("[dim]  跳过删除旧自动化[/dim]")
-                continue
+        current_parsed = group["_parsed"]
+        new_id = None
+
+        for attempt in range(3):  # 最多自动修复 2 次
+            merged_config = normalize_automation(current_parsed)
+            label = "创建合并后的自动化..." if attempt == 0 else f"重试第 {attempt} 次..."
+            with console.status(label):
+                try:
+                    new_id = automation_manager.create_automation(merged_config)
+                    rprint(f"[green]  合并创建成功（ID: {new_id}）[/green]")
+                    break
+                except Exception as e:
+                    err_str = str(e)
+                    rprint(f"[red]  创建失败（第 {attempt + 1} 次）：{err_str}[/red]")
+                    if attempt >= 2:
+                        rprint("[dim]  已达最大重试次数，跳过[/dim]")
+                        break
+            fixed = _llm_fix_yaml(current_parsed, err_str)
+            if not fixed:
+                rprint("[yellow]  AI 无法修复，跳过[/yellow]")
+                break
+            rprint("[dim]  AI 已修复，重新尝试写入...[/dim]")
+            current_parsed = fixed
+
+        if new_id is None:
+            rprint("[dim]  跳过删除旧自动化[/dim]")
+            continue
         for old_id in ids_to_delete:
             try:
                 automation_manager.delete_automation(old_id)
@@ -1240,13 +1280,28 @@ def consolidate(
     # 执行修复
     for item in confirmed_fixes:
         fix_id: str = item.get("id", "")
-        fixed_config = normalize_automation(item["_parsed"])
-        with console.status(f"更新 {item.get('alias', fix_id)}..."):
-            try:
-                automation_manager.update_automation(fix_id, fixed_config)
-                rprint(f"[green]  {item.get('alias', fix_id)} 修复成功[/green]")
-            except Exception as e:
-                rprint(f"[red]  修复失败（{fix_id}）：{e}[/red]")
+        current_parsed = item["_parsed"]
+
+        for attempt in range(3):
+            fixed_config = normalize_automation(current_parsed)
+            label = f"更新 {item.get('alias', fix_id)}..." if attempt == 0 else f"重试第 {attempt} 次..."
+            with console.status(label):
+                try:
+                    automation_manager.update_automation(fix_id, fixed_config)
+                    rprint(f"[green]  {item.get('alias', fix_id)} 修复成功[/green]")
+                    break
+                except Exception as e:
+                    err_str = str(e)
+                    rprint(f"[red]  修复失败（第 {attempt + 1} 次）：{err_str}[/red]")
+                    if attempt >= 2:
+                        rprint("[dim]  已达最大重试次数，跳过[/dim]")
+                        break
+            fixed = _llm_fix_yaml(current_parsed, err_str)
+            if not fixed:
+                rprint("[yellow]  AI 无法修复，跳过[/yellow]")
+                break
+            rprint("[dim]  AI 已修复，重新尝试写入...[/dim]")
+            current_parsed = fixed
 
     # Reload
     with console.status("重载自动化配置..."):
