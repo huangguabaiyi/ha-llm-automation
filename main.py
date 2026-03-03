@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import readline  # noqa: F401 — 启用 GNU readline，修复 input() 退格/方向键异常
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
