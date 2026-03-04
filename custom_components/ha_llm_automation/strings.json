@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "配置 LLM 接口",
+        "description": "配置用于生成自动化的大语言模型接口",
+        "data": {
+          "provider": "LLM Provider",
+          "api_key": "API Key",
+          "base_url": "Base URL（仅 openai_compatible 需填）",
+          "model": "模型名称",
+          "max_tokens": "最大 Token 数",
+          "temperature": "温度（0.0-1.0）"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接到 LLM 接口，请检查 API Key 和 URL",
+      "invalid_auth": "API Key 无效",
+      "unknown": "未知错误"
+    },
+    "abort": {
+      "already_configured": "HA LLM Automation 已经配置过了"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "调整配置",
+        "data": {
+          "model": "模型名称",
+          "max_tokens": "最大 Token 数",
+          "temperature": "温度",
+          "extra_visible_domains": "额外可见域（逗号分隔）",
+          "hidden_domains": "隐藏域（逗号分隔）"
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 config.json
+cli_tool/config.json
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,7 +7,11 @@ __pycache__/
 venv/
 .env
 backup/archives/
+cli_tool/backup/archives/
 knowledge/cache/
+cli_tool/knowledge/cache/
+custom_components/ha_llm_automation/doc_cache/
+custom_components/ha_llm_automation/backup/automations_backup_*
 *.log
 .DS_Store
 .claude/

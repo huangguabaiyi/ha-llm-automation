@@ -1,0 +1,315 @@
+"""
+HABridge — 用 HA 内置对象替代 cli_tool/ha_client 的 REST 调用。
+
+- 实体读取：直接使用 hass.states / entity_registry / area_registry / device_registry
+- 自动化 CRUD：通过 aiohttp REST（HA 内部地址 http://localhost:8123）
+- 自动化 reload：hass.services.async_call("automation", "reload")
+- 访问令牌：setup 阶段创建 refresh_token，每次 REST 调用生成新 access_token
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+
+import yaml
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .automations_utils import validate_automation
+
+
+class HABridge:
+    """用 hass 内置对象替代 httpx REST 调用。"""
+
+    def __init__(self, hass: HomeAssistant, access_token: str):
+        """
+        access_token: setup 阶段生成的 Bearer token，用于 REST 调用
+        """
+        self._hass = hass
+        self._access_token = access_token
+        self._base_url = "http://localhost:8123"
+
+    # ------------------------------------------------------------------
+    # 属性
+    # ------------------------------------------------------------------
+
+    def update_token(self, token: str) -> None:
+        """更新 access token（token 过期时调用）"""
+        self._access_token = token
+
+    # ------------------------------------------------------------------
+    # 实体（直接使用 HA Python API，无需 REST）
+    # ------------------------------------------------------------------
+
+    async def get_all_states(self) -> list[dict]:
+        """获取全量实体状态（等价于 GET /api/states）"""
+        states = self._hass.states.async_all()
+        return [s.as_dict() for s in states]
+
+    async def get_entity_registry(self) -> list[dict]:
+        """获取实体注册表"""
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(self._hass)
+        return [
+            {
+                "entity_id": entry.entity_id,
+                "device_id": entry.device_id,
+                "area_id": entry.area_id,
+                "disabled_by": entry.disabled_by.value if entry.disabled_by else None,
+                "hidden_by": entry.hidden_by.value if entry.hidden_by else None,
+                "entity_category": entry.entity_category.value if entry.entity_category else None,
+            }
+            for entry in registry.entities.values()
+        ]
+
+    async def get_area_registry(self) -> list[dict]:
+        """获取区域注册表"""
+        from homeassistant.helpers import area_registry as ar
+        registry = ar.async_get(self._hass)
+        return [
+            {"area_id": area.id, "name": area.name}
+            for area in registry.areas.values()
+        ]
+
+    async def get_device_registry(self) -> list[dict]:
+        """获取设备注册表"""
+        from homeassistant.helpers import device_registry as dr
+        registry = dr.async_get(self._hass)
+        return [
+            {"id": device.id, "area_id": device.area_id}
+            for device in registry.devices.values()
+        ]
+
+    async def get_entities(
+        self,
+        extra_visible_domains: set[str] | None = None,
+        hidden_domains: set[str] | None = None,
+    ) -> list[dict]:
+        """
+        三步合一：注册表 → 过滤 → 注入区域 → 返回实体列表。
+        返回格式与 cli_tool/main.py 的 get_entities() 一致。
+        """
+        # 获取注册表数据
+        try:
+            entities_raw = await self.get_entity_registry()
+            areas_raw = await self.get_area_registry()
+            devices_raw = await self.get_device_registry()
+        except Exception:
+            entities_raw = []
+            areas_raw = []
+            devices_raw = []
+
+        # 构建映射
+        area_id_to_name: dict[str, str] = {a["area_id"]: a["name"] for a in areas_raw}
+        device_area: dict[str, str] = {
+            d["id"]: d["area_id"] for d in devices_raw if d.get("area_id")
+        }
+
+        _EXCLUDE_CATEGORIES = {"diagnostic", "config"}
+        area_map: dict[str, str] = {}
+        exclude_ids: set[str] = set()
+
+        for ent in entities_raw:
+            eid = ent.get("entity_id", "")
+            if not eid:
+                continue
+            if ent.get("disabled_by") is not None:
+                exclude_ids.add(eid)
+                continue
+            if ent.get("hidden_by") is not None:
+                exclude_ids.add(eid)
+                continue
+            if ent.get("entity_category") in _EXCLUDE_CATEGORIES:
+                exclude_ids.add(eid)
+                continue
+            area_id = ent.get("area_id") or device_area.get(ent.get("device_id", ""), "")
+            if area_id:
+                area_map[eid] = area_id_to_name.get(area_id, area_id)
+
+        # 从 states 获取实体
+        all_states = await self.get_all_states()
+        _ATTR_WHITELIST: dict[str, list[str]] = {
+            "light": ["brightness", "color_temp", "rgb_color", "supported_features"],
+            "climate": ["temperature", "current_temperature", "hvac_mode", "hvac_modes"],
+            "cover": ["current_position", "supported_features"],
+            "media_player": ["media_title", "source", "volume_level", "state"],
+            "sensor": ["unit_of_measurement", "device_class", "state_class"],
+            "binary_sensor": ["device_class"],
+        }
+        _SKIP_STATES = {"unavailable", "unknown"}
+
+        entities: list[dict] = []
+        for s in all_states:
+            entity_id = s.get("entity_id", "")
+            if not entity_id or entity_id in exclude_ids:
+                continue
+            state_val = s.get("state", "")
+            if state_val in _SKIP_STATES:
+                continue
+
+            domain = entity_id.split(".")[0] if "." in entity_id else ""
+            attrs = s.get("attributes", {})
+            allowed_keys = _ATTR_WHITELIST.get(domain, [])
+            filtered_attrs = {k: attrs[k] for k in allowed_keys if k in attrs}
+
+            entities.append({
+                "entity_id": entity_id,
+                "friendly_name": attrs.get("friendly_name", ""),
+                "domain": domain,
+                "state": state_val,
+                "area": area_map.get(entity_id, ""),
+                "attributes": filtered_attrs,
+            })
+
+        return entities
+
+    # ------------------------------------------------------------------
+    # 自动化（使用 REST API）
+    # ------------------------------------------------------------------
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json",
+        }
+
+    async def list_automations(self) -> list[dict]:
+        """通过 states 接口列举所有自动化摘要"""
+        all_states = await self.get_all_states()
+        result = []
+        for s in all_states:
+            entity_id = s.get("entity_id", "")
+            if not entity_id.startswith("automation."):
+                continue
+            attrs = s.get("attributes", {})
+            automation_id = attrs.get("id", "")
+            result.append({
+                "id": automation_id,
+                "alias": attrs.get("friendly_name", entity_id),
+                "description": attrs.get("description", ""),
+                "mode": attrs.get("mode", "single"),
+                "entity_id": entity_id,
+            })
+        return result
+
+    async def get_automation_config(self, automation_id: str) -> dict:
+        """获取单个自动化的完整配置（GET /api/config/automation/config/{id}）"""
+        session = async_get_clientsession(self._hass, verify_ssl=False)
+        url = f"{self._base_url}/api/config/automation/config/{automation_id}"
+        async with session.get(url, headers=self._headers()) as resp:
+            if resp.status == 404:
+                raise ValueError(f"自动化 {automation_id} 不存在或为 YAML 型（无法通过 API 获取）")
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def create_automation(self, config: dict) -> str:
+        """
+        创建新自动化（POST /api/config/automation/config/new）。
+        返回新自动化的 ID。
+        """
+        validate_automation(config)
+
+        # 记录创建前的自动化列表
+        before = {a["entity_id"] for a in await self.list_automations()}
+
+        payload = dict(config)
+        payload["id"] = str(int(time.time() * 1000))
+
+        session = async_get_clientsession(self._hass, verify_ssl=False)
+        url = f"{self._base_url}/api/config/automation/config/new"
+        async with session.post(
+            url,
+            headers=self._headers(),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        ) as resp:
+            if not resp.ok:
+                body = (await resp.text())[:600]
+                raise RuntimeError(f"{resp.status} — HA 说：{body}")
+
+        # reload 并等待新自动化出现
+        await self.reload_automations()
+        for _ in range(8):
+            await asyncio.sleep(1)
+            after = await self.list_automations()
+            new_items = [a for a in after if a["entity_id"] not in before]
+            if new_items:
+                return new_items[-1]["id"] or new_items[-1]["entity_id"]
+
+        return payload["id"]
+
+    async def update_automation(self, automation_id: str, config: dict) -> bool:
+        """更新已有自动化（POST /api/config/automation/config/{id}）"""
+        validate_automation(config)
+        session = async_get_clientsession(self._hass, verify_ssl=False)
+        url = f"{self._base_url}/api/config/automation/config/{automation_id}"
+        async with session.post(
+            url,
+            headers=self._headers(),
+            data=json.dumps(config, ensure_ascii=False).encode("utf-8"),
+        ) as resp:
+            if not resp.ok:
+                body = (await resp.text())[:600]
+                raise RuntimeError(f"{resp.status} — HA 说：{body}")
+        return True
+
+    async def delete_automation(self, automation_id: str) -> bool:
+        """删除自动化（DELETE /api/config/automation/config/{id}）"""
+        session = async_get_clientsession(self._hass, verify_ssl=False)
+        url = f"{self._base_url}/api/config/automation/config/{automation_id}"
+        async with session.delete(url, headers=self._headers()) as resp:
+            resp.raise_for_status()
+        return True
+
+    async def reload_automations(self) -> bool:
+        """触发 HA 重载自动化配置"""
+        await self._hass.services.async_call("automation", "reload", blocking=True)
+        return True
+
+    @staticmethod
+    def to_yaml(config: dict) -> str:
+        return yaml.dump(config, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+async def create_ha_bridge(hass: HomeAssistant, entry_id: str) -> HABridge:
+    """
+    创建 HABridge 实例，生成内部 access token。
+    在 async_setup_entry 中调用，将结果存入 hass.data。
+    """
+    access_token = await _get_or_create_access_token(hass, entry_id)
+    return HABridge(hass, access_token)
+
+
+async def _get_or_create_access_token(hass: HomeAssistant, entry_id: str) -> str:
+    """
+    为集成创建或重用一个 access token。
+    使用第一个非系统管理员用户创建 refresh token，再生成 access token。
+    """
+    try:
+        users = await hass.auth.async_get_users()
+        admin_user = next(
+            (u for u in users if not u.system_generated and u.is_admin),
+            None,
+        )
+        if admin_user is None:
+            raise RuntimeError("找不到管理员用户，无法创建 access token")
+
+        client_name = f"ha_llm_automation_{entry_id}"
+        # 检查是否已存在同名 refresh token
+        existing = [
+            t for t in admin_user.refresh_tokens.values()
+            if t.client_name == client_name
+        ]
+        if existing:
+            refresh_token = existing[0]
+        else:
+            # TOKEN_TYPE_NORMAL 在所有 HA 版本中都可用
+            from homeassistant.auth.models import TOKEN_TYPE_NORMAL
+            refresh_token = await hass.auth.async_create_refresh_token(
+                admin_user,
+                client_name=client_name,
+                token_type=TOKEN_TYPE_NORMAL,
+            )
+        return hass.auth.async_create_access_token(refresh_token)
+    except Exception as e:
+        raise RuntimeError(f"创建 HA access token 失败：{e}") from e
