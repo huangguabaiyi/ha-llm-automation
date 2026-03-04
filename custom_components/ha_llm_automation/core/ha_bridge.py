@@ -303,12 +303,12 @@ async def _get_or_create_access_token(hass: HomeAssistant, entry_id: str) -> str
         if existing:
             refresh_token = existing[0]
         else:
-            # TOKEN_TYPE_NORMAL 在所有 HA 版本中都可用
-            from homeassistant.auth.models import TOKEN_TYPE_NORMAL
+            # 使用 LONG_LIVED_ACCESS_TOKEN 类型，不需要 client_id，兼容所有 HA 版本
+            from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
             refresh_token = await hass.auth.async_create_refresh_token(
                 admin_user,
                 client_name=client_name,
-                token_type=TOKEN_TYPE_NORMAL,
+                token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
             )
         return hass.auth.async_create_access_token(refresh_token)
     except Exception as e:
