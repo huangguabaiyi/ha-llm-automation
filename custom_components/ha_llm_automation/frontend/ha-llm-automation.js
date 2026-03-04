@@ -1,22 +1,23 @@
 /**
- * HA LLM Automation Panel
- * LitElement single-file panel for Home Assistant HACS integration
+ * HA LLM Automation Panel — v2.0
+ * Full rewrite with config tab, improved UX, color-coded logs, toast notifications
  */
 
 const DOMAIN = "ha_llm_automation";
 
 // ============================================================
-// Utility: generate session id
+// Utilities
 // ============================================================
 function genSessionId() {
   return `ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// ============================================================
-// Utility: simple diff renderer (line-level)
-// ============================================================
+function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function renderDiff(before, after) {
-  if (!before) return `<pre style="background:#1a1a2e;padding:12px;border-radius:6px;overflow:auto;font-size:12px;line-height:1.5">${escHtml(after)}</pre>`;
+  if (!before) return `<pre class="yaml-block">${escHtml(after)}</pre>`;
   const bLines = before.split("\n");
   const aLines = after.split("\n");
   const maxLen = Math.max(bLines.length, aLines.length);
@@ -38,10 +39,6 @@ function renderDiff(before, after) {
   return html;
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 // ============================================================
 // Styles
 // ============================================================
@@ -50,7 +47,7 @@ const STYLES = `
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: var(--primary-background-color, #111827);
+    background: var(--primary-background-color, #0f1117);
     color: var(--primary-text-color, #e5e7eb);
     font-family: var(--paper-font-body1_-_font-family, sans-serif);
     font-size: 14px;
@@ -58,51 +55,55 @@ const STYLES = `
   .header {
     display: flex;
     align-items: center;
-    padding: 16px 24px;
-    background: var(--app-header-background-color, #1f2937);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 14px 24px;
+    background: var(--app-header-background-color, #1a1f2e);
+    border-bottom: 1px solid var(--divider-color, rgba(255,255,255,0.07));
     flex-shrink: 0;
+    gap: 12px;
   }
   .header h1 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 17px;
+    font-weight: 700;
     flex: 1;
-    color: var(--primary-text-color, #f3f4f6);
+    color: #818cf8;
+    letter-spacing: 0.02em;
   }
   .tabs {
     display: flex;
-    gap: 4px;
+    gap: 0;
     padding: 0 24px;
-    background: var(--app-header-background-color, #1f2937);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: var(--app-header-background-color, #1a1f2e);
+    border-bottom: 1px solid var(--divider-color, rgba(255,255,255,0.07));
     flex-shrink: 0;
     overflow-x: auto;
   }
   .tab {
-    padding: 10px 16px;
+    padding: 11px 18px;
     cursor: pointer;
-    border-bottom: 3px solid transparent;
+    border-bottom: 2px solid transparent;
     color: var(--secondary-text-color, #9ca3af);
     font-weight: 500;
-    transition: all 0.15s;
+    font-size: 13px;
+    transition: color 0.15s;
     white-space: nowrap;
+    position: relative;
   }
   .tab:hover { color: var(--primary-text-color, #f3f4f6); }
   .tab.active {
-    border-bottom-color: var(--primary-color, #6366f1);
-    color: var(--primary-color, #6366f1);
+    color: #818cf8;
+    border-bottom-color: #818cf8;
   }
   .content {
     flex: 1;
     overflow-y: auto;
-    padding: 24px;
+    padding: 20px 24px;
     display: flex;
-    gap: 24px;
+    gap: 20px;
   }
   .main-area { flex: 1; min-width: 0; }
   .log-area {
-    width: 300px;
+    width: 290px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -112,26 +113,26 @@ const STYLES = `
     .log-area { width: 100%; }
   }
   .card {
-    background: var(--card-background-color, #1f2937);
+    background: var(--card-background-color, #1e2433);
     border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-    border: 1px solid rgba(255,255,255,0.06);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.06));
   }
   .card-title {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 700;
     color: var(--secondary-text-color, #9ca3af);
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
   }
   textarea, input[type=text], input[type=password], input[type=number], select {
     width: 100%;
-    background: rgba(0,0,0,0.3);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--secondary-background-color, rgba(0,0,0,0.35));
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
     border-radius: 8px;
-    padding: 10px 12px;
+    padding: 9px 12px;
     color: var(--primary-text-color, #e5e7eb);
     font-family: inherit;
     font-size: 14px;
@@ -141,7 +142,8 @@ const STYLES = `
     transition: border-color 0.15s;
   }
   textarea:focus, input:focus, select:focus {
-    border-color: var(--primary-color, #6366f1);
+    border-color: #818cf8;
+    box-shadow: 0 0 0 2px rgba(129,140,248,0.15);
   }
   textarea { min-height: 80px; }
   .btn {
@@ -152,46 +154,52 @@ const STYLES = `
     border-radius: 8px;
     border: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.15s;
   }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn-primary {
-    background: var(--primary-color, #6366f1);
+    background: #818cf8;
     color: white;
+    box-shadow: 0 2px 8px rgba(129,140,248,0.25);
   }
-  .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-  .btn-success { background: #059669; color: white; }
-  .btn-success:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.12);
+    box-shadow: 0 4px 14px rgba(129,140,248,0.35);
+  }
+  .btn-success { background: #059669; color: white; box-shadow: 0 2px 8px rgba(5,150,105,0.2); }
+  .btn-success:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
   .btn-danger { background: #dc2626; color: white; }
+  .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
   .btn-secondary {
     background: rgba(255,255,255,0.08);
     color: var(--primary-text-color, #e5e7eb);
   }
-  .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+  .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
   .btn-sm { padding: 5px 10px; font-size: 12px; }
   .automation-card {
-    background: rgba(0,0,0,0.2);
+    background: var(--secondary-background-color, rgba(0,0,0,0.2));
     border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.08);
-    margin-bottom: 12px;
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.07));
+    margin-bottom: 10px;
     overflow: hidden;
+    border-left: 3px solid transparent;
   }
-  .automation-card.approved { border-color: #059669; }
-  .automation-card.skipped { border-color: #6b7280; opacity: 0.6; }
-  .automation-card.warning { border-color: #d97706; }
+  .automation-card.approved { border-left-color: #059669; border-color: rgba(5,150,105,0.4); }
+  .automation-card.skipped { border-left-color: #6b7280; opacity: 0.55; }
+  .automation-card.warning { border-left-color: #d97706; border-color: rgba(217,119,6,0.35); }
   .automation-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 16px;
-    background: rgba(255,255,255,0.03);
+    padding: 11px 14px;
+    background: rgba(128,128,128,0.05);
     cursor: pointer;
     user-select: none;
   }
-  .automation-header:hover { background: rgba(255,255,255,0.06); }
-  .auto-title { flex: 1; font-weight: 500; }
+  .automation-header:hover { background: rgba(128,128,128,0.1); }
+  .auto-title { flex: 1; font-weight: 500; font-size: 13px; }
   .tag {
     display: inline-block;
     padding: 2px 8px;
@@ -203,6 +211,7 @@ const STYLES = `
   .tag-fix { background: #3a1e1e; color: #f87171; }
   .tag-ok { background: #1a3a1a; color: #4ade80; }
   .tag-warn { background: #3a2a0a; color: #fbbf24; }
+  .tag-info { background: rgba(129,140,248,0.15); color: #818cf8; }
   .yaml-block {
     background: #0d1117;
     border-radius: 6px;
@@ -213,45 +222,66 @@ const STYLES = `
     overflow-x: auto;
     white-space: pre;
     color: #c9d1d9;
-    border: 1px solid rgba(255,255,255,0.08);
-    max-height: 400px;
+    border: 1px solid rgba(255,255,255,0.07);
+    max-height: 380px;
     overflow-y: auto;
+    position: relative;
   }
-  .auto-body { padding: 16px; }
-  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .refine-input { margin-top: 8px; display: flex; gap: 8px; align-items: flex-start; }
-  .refine-input textarea { min-height: 60px; flex: 1; }
+  .yaml-wrapper { position: relative; }
+  .yaml-copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    color: #9ca3af;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .yaml-copy-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  .auto-body { padding: 14px 16px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .refine-area { margin-top: 10px; display: none; }
+  .refine-area.visible { display: block; }
+  .refine-input { display: flex; gap: 8px; align-items: flex-start; }
+  .refine-input textarea { min-height: 56px; flex: 1; }
   .log-panel {
-    background: var(--card-background-color, #1f2937);
+    background: var(--card-background-color, #1a1f2e);
     border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.06));
     display: flex;
     flex-direction: column;
-    max-height: 500px;
+    max-height: 520px;
     position: sticky;
     top: 0;
   }
   .log-title {
-    padding: 12px 16px;
+    padding: 11px 14px;
     font-weight: 600;
-    font-size: 13px;
+    font-size: 12px;
     color: var(--secondary-text-color, #9ca3af);
     border-bottom: 1px solid rgba(255,255,255,0.06);
     display: flex;
     align-items: center;
     justify-content: space-between;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .log-entries {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: 10px 12px;
     font-family: monospace;
-    font-size: 12px;
+    font-size: 11.5px;
     line-height: 1.7;
   }
-  .log-entry { color: #9ca3af; }
-  .log-entry.error { color: #f87171; }
-  .log-entry.success { color: #4ade80; }
+  .log-entry { color: #6b7280; word-break: break-all; }
+  .log-error   { color: #f87171; }
+  .log-success { color: #4ade80; }
+  .log-prompt  { color: #a78bfa; font-size: 11px; opacity: 0.8; }
   .spinner {
     display: inline-block;
     width: 14px; height: 14px;
@@ -261,70 +291,183 @@ const STYLES = `
     animation: spin 0.6s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .select-full { width: 100%; }
   .form-row { margin-bottom: 12px; }
-  .form-label { display: block; margin-bottom: 6px; font-size: 13px; color: var(--secondary-text-color, #9ca3af); }
-  .analysis-box {
-    background: rgba(99,102,241,0.08);
-    border: 1px solid rgba(99,102,241,0.3);
-    border-radius: 8px;
-    padding: 14px 16px;
+  .form-label { display: block; margin-bottom: 5px; font-size: 12px; color: var(--secondary-text-color, #9ca3af); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+  .config-section {
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding-top: 14px;
+    margin-top: 14px;
+  }
+  .config-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #818cf8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     margin-bottom: 12px;
   }
-  .analysis-intent { font-weight: 600; margin-bottom: 8px; }
-  .analysis-list { margin: 0; padding-left: 18px; }
-  .analysis-list li { margin-bottom: 4px; color: var(--secondary-text-color, #9ca3af); }
+  .pw-wrapper { position: relative; }
+  .pw-toggle {
+    position: absolute; right: 10px; top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer; color: #9ca3af; font-size: 14px;
+    background: none; border: none; padding: 2px;
+  }
+  .tag-input-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    background: var(--secondary-background-color, rgba(0,0,0,0.35));
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+    border-radius: 8px;
+    padding: 6px 10px;
+    min-height: 40px;
+    cursor: text;
+    transition: border-color 0.15s;
+  }
+  .tag-input-wrapper:focus-within { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.15); }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(129,140,248,0.18); color: #818cf8;
+    border-radius: 4px; padding: 2px 7px; font-size: 12px;
+  }
+  .tag-chip-del { cursor: pointer; font-size: 13px; line-height: 1; }
+  .tag-chip-del:hover { color: #f87171; }
+  .tag-bare-input {
+    background: transparent; border: none; outline: none;
+    color: var(--primary-text-color, #e5e7eb); font-size: 13px; padding: 2px 4px; min-width: 80px; flex: 1;
+  }
+  .multi-select-dropdown {
+    background: var(--card-background-color, #1a1f2e);
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+    border-radius: 8px;
+    padding: 6px 0;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+  }
+  .multi-select-dropdown.open { display: block; }
+  .multi-select-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  .multi-select-item:hover { background: rgba(255,255,255,0.05); }
+  .dropdown-toggle-btn {
+    width: 100%;
+    text-align: left;
+    background: var(--secondary-background-color, rgba(0,0,0,0.3));
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: var(--secondary-text-color, #9ca3af);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .dropdown-toggle-btn:hover { border-color: #818cf8; }
+  .analysis-box {
+    background: rgba(129,140,248,0.07);
+    border: 1px solid rgba(129,140,248,0.2);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .analysis-intent {
+    font-size: 15px;
+    font-weight: 700;
+    color: #c7d2fe;
+    padding: 6px 12px;
+    background: rgba(129,140,248,0.1);
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .analysis-issues li { color: #f87171; }
+  .analysis-suggs li { color: #6ee7b7; }
+  .analysis-list { margin: 4px 0; padding-left: 20px; }
+  .analysis-list li { margin-bottom: 4px; font-size: 13px; }
   .diff-container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 12px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;
   }
   @media (max-width: 700px) { .diff-container { grid-template-columns: 1fr; } }
-  .diff-label { font-size: 12px; font-weight: 600; color: var(--secondary-text-color, #9ca3af); margin-bottom: 4px; }
+  .diff-label { font-size: 11px; font-weight: 600; color: #9ca3af; margin-bottom: 4px; }
+  .summary-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge-blue { background: rgba(96,165,250,0.15); color: #60a5fa; }
+  .badge-green { background: rgba(74,222,128,0.12); color: #4ade80; }
+  .badge-orange { background: rgba(251,191,36,0.12); color: #fbbf24; }
+  .badge-purple { background: rgba(167,139,250,0.15); color: #a78bfa; }
   .empty-state {
-    text-align: center;
-    padding: 60px 20px;
+    text-align: center; padding: 50px 20px;
     color: var(--secondary-text-color, #9ca3af);
   }
-  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
   .error-box {
-    background: rgba(220,38,38,0.1);
-    border: 1px solid rgba(220,38,38,0.3);
+    background: rgba(220,38,38,0.09);
+    border: 1px solid rgba(220,38,38,0.25);
     border-radius: 8px;
-    padding: 12px 16px;
+    padding: 10px 14px;
     color: #f87171;
     margin-bottom: 12px;
+    font-size: 13px;
   }
   .success-box {
-    background: rgba(5,150,105,0.1);
-    border: 1px solid rgba(5,150,105,0.3);
+    background: rgba(5,150,105,0.09);
+    border: 1px solid rgba(5,150,105,0.25);
     border-radius: 8px;
-    padding: 12px 16px;
+    padding: 10px 14px;
     color: #4ade80;
     margin-bottom: 12px;
+    font-size: 13px;
   }
   .backup-list { list-style: none; margin: 0; padding: 0; }
   .backup-item {
-    display: flex;
-    align-items: center;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    gap: 10px;
+    display: flex; align-items: center; padding: 9px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05); gap: 10px;
   }
   .backup-item:last-child { border-bottom: none; }
   .backup-info { flex: 1; }
   .backup-name { font-family: monospace; font-size: 12px; }
-  .backup-meta { font-size: 11px; color: var(--secondary-text-color, #9ca3af); margin-top: 2px; }
-  .select-wrapper { position: relative; }
-  .loading-overlay {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 20px;
-    color: var(--secondary-text-color, #9ca3af);
-    justify-content: center;
+  .backup-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .doc-list { list-style: none; margin: 0; padding: 0; }
+  .doc-item {
+    display: flex; align-items: center; padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05); gap: 10px;
   }
+  .doc-item:last-child { border-bottom: none; }
+  .doc-key { flex: 1; font-family: monospace; font-size: 12px; color: #818cf8; }
+  .doc-preview-area {
+    background: #0d1117; border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px; padding: 12px; font-family: monospace;
+    font-size: 11px; color: #c9d1d9; white-space: pre-wrap;
+    overflow-y: auto; max-height: 320px; margin-top: 10px;
+    display: none;
+  }
+  .doc-preview-area.visible { display: block; }
+  .toast-container {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 9999; display: flex; flex-direction: column; gap: 8px; align-items: center;
+  }
+  .toast {
+    background: var(--card-background-color, #1e2433);
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
+    border-radius: 8px; padding: 10px 20px;
+    color: var(--primary-text-color, #e5e7eb);
+    font-size: 13px; max-width: 400px; text-align: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    animation: toast-in 0.2s ease;
+  }
+  .toast.success { border-color: #059669; color: #4ade80; }
+  .toast.error { border-color: #dc2626; color: #f87171; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .checkbox-row {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 4px 0;
+  }
+  .checkbox-row input[type=checkbox] { width: auto; }
 `;
 
 // ============================================================
@@ -335,7 +478,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._tab = "create";
-    this._logs = [];
+    this._logs = [];  // [{text, cls}]
     this._loading = false;
     this._sessionId = null;
     this._logUnsub = null;
@@ -343,9 +486,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     // Create state
     this._createResult = null;
     this._createSystemPrompt = "";
-    this._createApprovedItems = new Set();
-    this._createSkippedItems = new Set();
-    this._createRefineTexts = {};
+    this._createExpanded = new Set();       // default collapsed
+    this._createRefineVisible = new Set();  // refine area visibility
+    this._createChecked = new Set();        // checkbox selection
 
     // Optimize state
     this._optimizeAutomations = [];
@@ -364,16 +507,32 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._consolidateRefineTexts = {};
     this._consolidateExpandedYaml = {};
 
-    // Backup state
+    // Config state
+    this._configData = {};
+    this._configLoaded = false;
+    this._showApiKey = false;
+    this._areas = [];
+    this._labels = [];
+    this._integrations = [];
+    this._areaDropOpen = false;
+    this._labelDropOpen = false;
+    this._integDropOpen = false;
+
+    // Knowledge/Backup state
     this._backups = [];
+    this._docPreview = {};  // {key: content}
 
     this._render();
-    this._loadAutomations();
+    // Do NOT call _loadAutomations() here — wait for hass to be injected
   }
 
   set hass(val) {
+    const firstLoad = !this._hass;
     this._hass = val;
     this._render();
+    if (firstLoad) {
+      this._loadAutomations();
+    }
   }
 
   set panel(val) {
@@ -389,7 +548,6 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   async _startSession() {
-    // Cancel previous subscription
     if (this._logUnsub) {
       this._logUnsub();
       this._logUnsub = null;
@@ -399,10 +557,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._logs = [];
     this._render();
 
-    // Subscribe to log events
     this._logUnsub = await this._hass.connection.subscribeMessage(
       (data) => {
-        this._logs.push(data.message);
+        this._pushLog(data.message);
         this._render();
         this._scrollLog();
       },
@@ -411,8 +568,20 @@ class HaLlmAutomationPanel extends HTMLElement {
     return sessionId;
   }
 
+  _pushLog(msg) {
+    let cls = "log-entry";
+    if (msg.startsWith("[ERROR]") || msg.includes("失败") || msg.includes("错误")) {
+      cls = "log-error";
+    } else if (msg.startsWith("[OK]") || msg.includes("完成") || msg.includes("成功")) {
+      cls = "log-success";
+    } else if (msg.startsWith("[PROMPT]")) {
+      cls = "log-prompt";
+    }
+    this._logs.push({ text: msg, cls });
+  }
+
   _log(msg) {
-    this._logs.push(msg);
+    this._pushLog(msg);
     this._render();
     this._scrollLog();
   }
@@ -420,6 +589,16 @@ class HaLlmAutomationPanel extends HTMLElement {
   _scrollLog() {
     const logEl = this.shadowRoot.querySelector(".log-entries");
     if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  _toast(msg, type = "") {
+    const container = this.shadowRoot.querySelector(".toast-container");
+    if (!container) return;
+    const el = document.createElement("div");
+    el.className = `toast${type ? " " + type : ""}`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
   }
 
   // ------------------------------------------------------------------
@@ -432,7 +611,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._optimizeAutomations = (r.automations || []).filter(a => a.accessible);
       this._render();
     } catch (e) {
-      // ignore on load
+      // ignore on initial load
     }
   }
 
@@ -442,6 +621,36 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._backups = r.backups || [];
       this._render();
     } catch (e) {}
+  }
+
+  async _loadConfig() {
+    try {
+      const r = await this._ws("get_config");
+      this._configData = r.config || {};
+      this._configLoaded = true;
+      this._render();
+    } catch (e) {}
+  }
+
+  async _loadAreas() {
+    try {
+      const r = await this._ws("get_areas");
+      this._areas = r.areas || [];
+    } catch (e) { this._areas = []; }
+  }
+
+  async _loadLabels() {
+    try {
+      const r = await this._ws("get_labels");
+      this._labels = r.labels || [];
+    } catch (e) { this._labels = []; }
+  }
+
+  async _loadIntegrations() {
+    try {
+      const r = await this._ws("get_integrations");
+      this._integrations = r.integrations || [];
+    } catch (e) { this._integrations = []; }
   }
 
   // ------------------------------------------------------------------
@@ -455,9 +664,9 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     this._loading = true;
     this._createResult = null;
-    this._createApprovedItems.clear();
-    this._createSkippedItems.clear();
-    this._createRefineTexts = {};
+    this._createExpanded = new Set();
+    this._createRefineVisible = new Set();
+    this._createChecked = new Set();
     this._render();
 
     try {
@@ -465,18 +674,18 @@ class HaLlmAutomationPanel extends HTMLElement {
       const r = await this._ws("create_start", {
         requirement,
         session_id: sessionId,
-        use_docs: true,
+        // use_docs 由后端从 config.options 读取，此处不传
       });
       this._createResult = r;
       this._createSystemPrompt = r.system_prompt || "";
-      // Auto-approve all valid items
+      // Auto-check all valid items (but don't expand)
       (r.automations || []).forEach((item, i) => {
         if (item.parsed && (!item.warnings || item.warnings.length === 0)) {
-          this._createApprovedItems.add(i);
+          this._createChecked.add(i);
         }
       });
     } catch (e) {
-      this._log(`错误：${e.message || e}`);
+      this._log(`[ERROR] ${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -502,13 +711,13 @@ class HaLlmAutomationPanel extends HTMLElement {
       });
       this._createResult.automations[index] = r;
       if (r.parsed && !r.warnings?.length) {
-        this._createApprovedItems.add(index);
+        this._createChecked.add(index);
       } else {
-        this._createApprovedItems.delete(index);
+        this._createChecked.delete(index);
       }
-      this._createRefineTexts[index] = "";
+      this._createRefineVisible.delete(index);
     } catch (e) {
-      this._log(`修改失败：${e.message || e}`);
+      this._log(`[ERROR] 修改失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -517,10 +726,10 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   async _createSaveAll() {
     const automations = (this._createResult?.automations || [])
-      .filter((item, i) => this._createApprovedItems.has(i) && item.parsed);
+      .filter((item, i) => this._createChecked.has(i) && item.parsed);
 
     if (automations.length === 0) {
-      alert("没有选中的自动化可以保存");
+      this._toast("没有选中的自动化可以保存", "error");
       return;
     }
 
@@ -533,10 +742,10 @@ class HaLlmAutomationPanel extends HTMLElement {
         automations: automations.map(a => a.parsed),
         session_id: sessionId,
       });
-      this._log(`保存完成：${r.results?.length || 0} 条`);
+      this._toast(`保存成功：${r.results?.length || 0} 条`, "success");
       this._createResult = null;
     } catch (e) {
-      this._log(`保存失败：${e.message || e}`);
+      this._log(`[ERROR] 保存失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -558,15 +767,12 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._render();
 
     try {
-      const r = await this._ws("optimize_analyze", {
-        automation_id: id,
-        session_id: sessionId,
-      });
+      const r = await this._ws("optimize_analyze", { automation_id: id, session_id: sessionId });
       this._optimizeAnalysis = r.analysis;
       this._optimizeAutoYaml = r.automation_yaml;
       this._optimizeOriginalYaml = r.automation_yaml;
     } catch (e) {
-      this._log(`分析失败：${e.message || e}`);
+      this._log(`[ERROR] 分析失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -588,7 +794,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._optimizeGenResult = r;
       this._optimizeSystemPrompt = r.system_prompt || "";
     } catch (e) {
-      this._log(`生成失败：${e.message || e}`);
+      this._log(`[ERROR] 生成失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -612,9 +818,8 @@ class HaLlmAutomationPanel extends HTMLElement {
         session_id: sessionId,
       });
       this._optimizeGenResult = r;
-      this._optimizeRefineText = "";
     } catch (e) {
-      this._log(`修改失败：${e.message || e}`);
+      this._log(`[ERROR] 修改失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -623,10 +828,9 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   async _optimizeSave() {
     if (!this._optimizeGenResult?.parsed) {
-      alert("无法保存：YAML 校验失败");
+      this._toast("无法保存：YAML 校验失败", "error");
       return;
     }
-
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
@@ -637,12 +841,12 @@ class HaLlmAutomationPanel extends HTMLElement {
         parsed: this._optimizeGenResult.parsed,
         session_id: sessionId,
       });
-      this._log("优化保存成功！");
+      this._toast("优化保存成功", "success");
       this._optimizeAnalysis = null;
       this._optimizeGenResult = null;
       await this._loadAutomations();
     } catch (e) {
-      this._log(`保存失败：${e.message || e}`);
+      this._log(`[ERROR] 保存失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -664,7 +868,6 @@ class HaLlmAutomationPanel extends HTMLElement {
     try {
       const r = await this._ws("consolidate_analyze", { session_id: sessionId });
       this._consolidatePlan = r;
-      // Auto-approve merges and fixes
       (r.merge_groups || []).forEach((g, i) => {
         this._consolidateApproved[`merge_${i}`] = g;
       });
@@ -672,7 +875,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         this._consolidateApproved[`fix_${i}`] = f;
       });
     } catch (e) {
-      this._log(`分析失败：${e.message || e}`);
+      this._log(`[ERROR] 分析失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -690,13 +893,9 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     try {
       const r = await this._ws("consolidate_refine", {
-        item_type: type,
-        item_id: `${type}_${index}`,
-        current_yaml: currentYaml,
-        feedback,
-        session_id: sessionId,
+        item_type: type, item_id: `${type}_${index}`,
+        current_yaml: currentYaml, feedback, session_id: sessionId,
       });
-      // Update the yaml in plan
       if (type === "merge") {
         this._consolidatePlan.merge_groups[index].merged_yaml = r.yaml_str;
         if (this._consolidateApproved[`merge_${index}`]) {
@@ -708,9 +907,8 @@ class HaLlmAutomationPanel extends HTMLElement {
           this._consolidateApproved[`fix_${index}`].fixed_yaml = r.yaml_str;
         }
       }
-      this._consolidateRefineTexts[`${type}_${index}`] = "";
     } catch (e) {
-      this._log(`修改失败：${e.message || e}`);
+      this._log(`[ERROR] 修改失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
@@ -719,14 +917,12 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   async _consolidateExecute() {
     const approvedMerges = Object.entries(this._consolidateApproved)
-      .filter(([k]) => k.startsWith("merge_"))
-      .map(([, v]) => v);
+      .filter(([k]) => k.startsWith("merge_")).map(([, v]) => v);
     const approvedFixes = Object.entries(this._consolidateApproved)
-      .filter(([k]) => k.startsWith("fix_"))
-      .map(([, v]) => v);
+      .filter(([k]) => k.startsWith("fix_")).map(([, v]) => v);
 
     if (approvedMerges.length === 0 && approvedFixes.length === 0) {
-      alert("没有批准的条目");
+      this._toast("没有批准的条目", "error");
       return;
     }
 
@@ -740,13 +936,69 @@ class HaLlmAutomationPanel extends HTMLElement {
         approved_fixes: approvedFixes,
         session_id: sessionId,
       });
-      this._log(`执行完成：${r.success} 成功，${r.failed} 失败`);
+      this._toast(`执行完成：${r.success} 成功，${r.failed} 失败`, r.failed > 0 ? "error" : "success");
       this._consolidatePlan = null;
     } catch (e) {
-      this._log(`执行失败：${e.message || e}`);
+      this._log(`[ERROR] 执行失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Tab: Config — Save
+  // ------------------------------------------------------------------
+
+  async _saveConfig() {
+    // Collect form values
+    const $ = id => this.shadowRoot.getElementById(id);
+    const payload = {};
+
+    const fields = [
+      ["provider", "cfg-provider"],
+      ["api_key", "cfg-api-key"],
+      ["base_url", "cfg-base-url"],
+      ["model", "cfg-model"],
+    ];
+    for (const [k, id] of fields) {
+      const el = $(id);
+      if (el) payload[k] = el.value.trim();
+    }
+
+    const maxTokensEl = $("cfg-max-tokens");
+    if (maxTokensEl) {
+      const v = parseInt(maxTokensEl.value);
+      if (!isNaN(v)) payload.max_tokens = v;
+    }
+    const tempEl = $("cfg-temperature");
+    if (tempEl) {
+      const v = parseFloat(tempEl.value);
+      if (!isNaN(v)) payload.temperature = v;
+    }
+
+    const extraDomEl = $("cfg-extra-domains-input");
+    if (extraDomEl) payload.extra_visible_domains = extraDomEl.value.trim();
+    const hiddenDomEl = $("cfg-hidden-domains");
+    if (hiddenDomEl) payload.hidden_domains = hiddenDomEl.value.trim();
+
+    const logPromptEl = $("cfg-log-prompt");
+    if (logPromptEl) payload.log_prompt = logPromptEl.checked;
+
+    const useDocsEl = $("cfg-use-docs");
+    if (useDocsEl) payload.use_docs = useDocsEl.checked;
+
+    // Area / label / integration filters from config state
+    payload.area_filter = (this._configData.area_filter || []).slice();
+    payload.label_filter = (this._configData.label_filter || []).slice();
+    payload.integration_filter = (this._configData.integration_filter || []).slice();
+
+    try {
+      await this._ws("save_config", payload);
+      this._configData = { ...this._configData, ...payload };
+      this._toast("配置已保存", "success");
+    } catch (e) {
+      this._toast(`保存失败：${e.message || e}`, "error");
     }
   }
 
@@ -758,52 +1010,136 @@ class HaLlmAutomationPanel extends HTMLElement {
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
-
     try {
       const r = await this._ws("refresh_docs", { session_id: sessionId });
-      this._log(`刷新完成：${(r.succeeded || []).join(", ")}`);
+      this._toast(`刷新完成：${(r.succeeded || []).join(", ")}`, "success");
     } catch (e) {
-      this._log(`刷新失败：${e.message || e}`);
+      this._log(`[ERROR] 刷新失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
+    }
+  }
+
+  async _previewDoc(key) {
+    try {
+      const r = await this._ws("preview_doc", { doc_key: key });
+      this._docPreview = { key, content: r.content, truncated: r.truncated };
+      this._render();
+    } catch (e) {
+      this._toast(`预览失败：${e.message || e}`, "error");
     }
   }
 
   async _restoreBackup(path) {
     if (!confirm(`确认恢复此备份？\n${path}\n\n此操作将创建对应的自动化。`)) return;
-
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
-
     try {
       await this._ws("restore_backup", { backup_path: path, session_id: sessionId });
-      this._log("恢复完成");
+      this._toast("恢复完成", "success");
     } catch (e) {
-      this._log(`恢复失败：${e.message || e}`);
+      this._log(`[ERROR] 恢复失败：${e.message || e}`);
     } finally {
       this._loading = false;
       this._render();
     }
   }
 
+  async _clearBackups() {
+    if (!confirm("确认清空全部备份？不可恢复！")) return;
+    const sessionId = genSessionId();
+    try {
+      const r = await this._ws("clear_backups", { session_id: sessionId });
+      this._toast(`已删除 ${r.deleted} 个备份文件`, "success");
+      this._backups = [];
+      this._render();
+    } catch (e) {
+      this._toast(`清空失败：${e.message || e}`, "error");
+    }
+  }
+
   // ------------------------------------------------------------------
-  // Render helpers
+  // Render: YAML block with copy button
+  // ------------------------------------------------------------------
+
+  _renderYamlBlock(yaml, id) {
+    return `
+      <div class="yaml-wrapper">
+        <div class="yaml-block" id="${id || ""}">${escHtml(yaml)}</div>
+        <button class="yaml-copy-btn" data-yaml="${escHtml(yaml)}">复制</button>
+      </div>
+    `;
+  }
+
+  // ------------------------------------------------------------------
+  // Render: Tag input
+  // ------------------------------------------------------------------
+
+  _renderTagInput(containerId, tags, placeholder) {
+    return `
+      <div class="tag-input-wrapper" id="${containerId}-wrapper">
+        ${(tags || []).map((t, i) => `
+          <span class="tag-chip">
+            ${escHtml(t)}
+            <span class="tag-chip-del" data-container="${containerId}" data-index="${i}">×</span>
+          </span>
+        `).join("")}
+        <input type="text" class="tag-bare-input" id="${containerId}-input"
+          placeholder="${tags?.length ? '' : placeholder}" />
+      </div>
+    `;
+  }
+
+  // ------------------------------------------------------------------
+  // Render: Multi-select dropdown
+  // ------------------------------------------------------------------
+
+  _renderMultiSelect(id, items, selectedIds, labelKey, valueKey, isOpen) {
+    const selected = new Set(selectedIds || []);
+    const hasSelected = selected.size > 0;
+    return `
+      <div>
+        <div class="summary-badges" style="${hasSelected ? '' : 'display:none'}">
+          ${[...selected].map(sid => {
+            const item = items.find(it => it[valueKey] === sid);
+            return `<span class="badge badge-purple">${escHtml(item ? item[labelKey] : sid)}<span style="cursor:pointer;margin-left:4px" data-ms-remove="${id}" data-ms-val="${escHtml(sid)}">×</span></span>`;
+          }).join("")}
+        </div>
+        <button class="dropdown-toggle-btn" id="${id}-toggle">
+          ▼ 展开选择（${items.length} 个可选）
+        </button>
+        <div class="multi-select-dropdown ${isOpen ? 'open' : ''}" id="${id}-dropdown">
+          ${items.map(item => `
+            <label class="multi-select-item">
+              <input type="checkbox" ${selected.has(item[valueKey]) ? 'checked' : ''}
+                data-ms-id="${id}" data-ms-val="${escHtml(item[valueKey])}">
+              ${escHtml(item[labelKey])}
+              ${item[labelKey] !== item[valueKey] ? `<span style="color:#6b7280;font-size:11px;margin-left:4px">(${escHtml(item[valueKey])})</span>` : ''}
+            </label>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  // ------------------------------------------------------------------
+  // Render: Create Tab
   // ------------------------------------------------------------------
 
   _renderCreate() {
     const result = this._createResult;
-    const approvedCount = this._createApprovedItems.size;
+    const checkedCount = this._createChecked.size;
 
     return `
       <div class="card">
-        <div class="card-title">描述你的自动化需求</div>
+        <div class="card-title">描述自动化需求</div>
         <div class="form-row">
-          <textarea id="create-req" placeholder="例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇" rows="4">${""}</textarea>
+          <textarea id="create-req" placeholder="例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇" rows="4"></textarea>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn btn-primary" id="btn-create-start" ?disabled="${this._loading}">
+          <button class="btn btn-primary" id="btn-create-start" ${this._loading ? 'disabled' : ''}>
             ${this._loading ? '<span class="spinner"></span> 生成中...' : '▶ 生成自动化'}
           </button>
         </div>
@@ -811,10 +1147,11 @@ class HaLlmAutomationPanel extends HTMLElement {
 
       ${result ? this._renderCreateResults(result) : ""}
       ${result && result.automations?.length ? `
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-          <button class="btn btn-secondary" id="btn-create-select-all">全选</button>
-          <button class="btn btn-success" id="btn-create-save" ?disabled="${this._loading || approvedCount === 0}">
-            ${this._loading ? '<span class="spinner"></span>' : '✓'} 保存选中的 (${approvedCount} 条)
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-secondary btn-sm" id="btn-create-select-all">☑ 全选</button>
+          <button class="btn btn-secondary btn-sm" id="btn-create-deselect-all">☐ 全不选</button>
+          <button class="btn btn-success" id="btn-create-save" ${this._loading || checkedCount === 0 ? 'disabled' : ''}>
+            ${this._loading ? '<span class="spinner"></span>' : '✓'} 保存选中 (${checkedCount} 条)
           </button>
         </div>
       ` : ""}
@@ -826,36 +1163,49 @@ class HaLlmAutomationPanel extends HTMLElement {
     if (!items.length) return '<div class="error-box">AI 未能生成有效的自动化配置</div>';
 
     return items.map((item, i) => {
-      const approved = this._createApprovedItems.has(i);
-      const skipped = this._createSkippedItems.has(i);
+      const checked = this._createChecked.has(i);
+      const expanded = this._createExpanded.has(i);
+      const refineVisible = this._createRefineVisible.has(i);
       const hasWarnings = item.warnings?.length > 0;
       const alias = item.parsed?.alias || `automation_${i + 1}`;
-      const cardClass = skipped ? "automation-card skipped" : approved ? "automation-card approved" : hasWarnings ? "automation-card warning" : "automation-card";
+      let cardClass = "automation-card";
+      if (checked) cardClass += " approved";
+      else if (hasWarnings) cardClass += " warning";
 
       return `
         <div class="${cardClass}" id="auto-card-${i}">
           <div class="automation-header" id="auto-hdr-${i}">
-            <span style="font-size:16px">${approved ? "✓" : skipped ? "✗" : "○"}</span>
+            <input type="checkbox" ${checked ? 'checked' : ''} ${!item.parsed ? 'disabled' : ''}
+              id="auto-chk-${i}" style="width:auto;cursor:pointer" onclick="event.stopPropagation()">
             <span class="auto-title">[${i + 1}/${items.length}] ${escHtml(alias)}</span>
-            ${hasWarnings ? '<span class="tag tag-warn">⚠ 有问题</span>' : ""}
-            <span style="font-size:16px;color:#6b7280" class="expand-icon-${i}">▼</span>
+            ${hasWarnings ? '<span class="tag tag-warn">⚠ 有问题</span>' : '<span class="tag tag-ok">✓ 正常</span>'}
+            <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
           </div>
-          <div class="auto-body" id="auto-body-${i}">
-            ${hasWarnings ? `<div class="error-box">${item.warnings.map(w => escHtml(w)).join("<br>")}</div>` : ""}
-            <div class="yaml-block">${escHtml(item.yaml_str)}</div>
-            <div class="refine-input">
-              <textarea id="refine-input-${i}" placeholder="输入修改意见让 AI 重新生成..." rows="2"></textarea>
-              <button class="btn btn-secondary btn-sm" id="btn-refine-${i}">重新生成</button>
+          ${expanded ? `
+            <div class="auto-body">
+              ${hasWarnings ? `<div class="error-box">${item.warnings.map(w => escHtml(w)).join("<br>")}</div>` : ""}
+              ${this._renderYamlBlock(item.yaml_str, `yaml-${i}`)}
+              <div class="btn-row">
+                <button class="btn btn-secondary btn-sm" id="btn-refine-toggle-${i}">
+                  ${refineVisible ? '▲ 收起追问' : '✏ 追问修改'}
+                </button>
+              </div>
+              <div class="refine-area ${refineVisible ? 'visible' : ''}" id="refine-area-${i}">
+                <div class="refine-input" style="margin-top:8px">
+                  <textarea id="refine-input-${i}" placeholder="输入修改意见让 AI 重新生成..." rows="2"></textarea>
+                  <button class="btn btn-secondary btn-sm" id="btn-refine-${i}">重新生成</button>
+                </div>
+              </div>
             </div>
-            <div class="btn-row">
-              <button class="btn btn-success btn-sm" id="btn-approve-${i}" ?disabled="${!item.parsed}">✓ 批准</button>
-              <button class="btn btn-secondary btn-sm" id="btn-skip-${i}">✗ 跳过</button>
-            </div>
-          </div>
+          ` : ""}
         </div>
       `;
     }).join("");
   }
+
+  // ------------------------------------------------------------------
+  // Render: Optimize Tab
+  // ------------------------------------------------------------------
 
   _renderOptimize() {
     const automations = this._optimizeAutomations;
@@ -866,12 +1216,12 @@ class HaLlmAutomationPanel extends HTMLElement {
       <div class="card">
         <div class="card-title">选择要优化的自动化</div>
         <div class="form-row">
-          <select class="select-full" id="opt-select">
+          <select id="opt-select">
             <option value="">— 请选择 —</option>
-            ${automations.map(a => `<option value="${a.id}" ${this._optimizeSelectedId === a.id ? "selected" : ""}>${escHtml(a.alias)} [${a.id}]</option>`).join("")}
+            ${automations.map(a => `<option value="${escHtml(a.id)}" ${this._optimizeSelectedId === a.id ? "selected" : ""}>${escHtml(a.alias)} [${escHtml(a.id)}]</option>`).join("")}
           </select>
         </div>
-        <button class="btn btn-primary" id="btn-opt-analyze" ?disabled="${this._loading || !this._optimizeSelectedId}">
+        <button class="btn btn-primary" id="btn-opt-analyze" ${this._loading || !this._optimizeSelectedId ? 'disabled' : ''}>
           ${this._loading && !analysis ? '<span class="spinner"></span> 分析中...' : '分析意图 ▶'}
         </button>
       </div>
@@ -880,17 +1230,17 @@ class HaLlmAutomationPanel extends HTMLElement {
         <div class="card">
           <div class="card-title">Step 1 — 分析报告</div>
           <div class="analysis-box">
-            <div class="analysis-intent">🎯 意图：${escHtml(analysis.intent || "")}</div>
+            <div class="analysis-intent">🎯 ${escHtml(analysis.intent || "")}</div>
             ${analysis.issues?.length ? `
-              <div style="margin-top:8px;font-weight:600;font-size:12px;color:#f87171">发现的问题：</div>
-              <ul class="analysis-list">${analysis.issues.map(i => `<li>${escHtml(i)}</li>`).join("")}</ul>
+              <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:4px">⚠ 发现的问题：</div>
+              <ul class="analysis-list analysis-issues">${analysis.issues.map(i => `<li>⚠ ${escHtml(i)}</li>`).join("")}</ul>
             ` : ""}
             ${analysis.suggestions?.length ? `
-              <div style="margin-top:8px;font-weight:600;font-size:12px;color:#60a5fa">优化建议：</div>
-              <ul class="analysis-list">${analysis.suggestions.map(s => `<li>${escHtml(s)}</li>`).join("")}</ul>
+              <div style="font-size:12px;font-weight:700;color:#4ade80;margin-top:8px;margin-bottom:4px">✦ 优化建议：</div>
+              <ul class="analysis-list analysis-suggs">${analysis.suggestions.map(s => `<li>✦ ${escHtml(s)}</li>`).join("")}</ul>
             ` : ""}
           </div>
-          <button class="btn btn-primary" id="btn-opt-generate" ?disabled="${this._loading}">
+          <button class="btn btn-primary" id="btn-opt-generate" ${this._loading ? 'disabled' : ''}>
             ${this._loading && !genResult ? '<span class="spinner"></span> 生成中...' : '生成优化方案 ▶'}
           </button>
         </div>
@@ -900,14 +1250,22 @@ class HaLlmAutomationPanel extends HTMLElement {
         <div class="card">
           <div class="card-title">Step 2 — 优化结果</div>
           ${genResult.warnings?.length ? `<div class="error-box">${genResult.warnings.map(w => escHtml(w)).join("<br>")}</div>` : ""}
+          ${analysis?.suggestions?.length ? `
+            <div class="summary-badges">
+              ${analysis.suggestions.slice(0, 5).map((s, si) => {
+                const colors = ["badge-blue","badge-green","badge-orange","badge-purple","badge-blue"];
+                return `<span class="badge ${colors[si % colors.length]}">${escHtml(s.slice(0, 30))}${s.length > 30 ? "…" : ""}</span>`;
+              }).join("")}
+            </div>
+          ` : ""}
           <div class="diff-container">
             <div>
               <div class="diff-label">优化前</div>
-              <div class="yaml-block">${escHtml(this._optimizeOriginalYaml)}</div>
+              ${this._renderYamlBlock(this._optimizeOriginalYaml, "yaml-opt-before")}
             </div>
             <div>
               <div class="diff-label">优化后</div>
-              <div class="yaml-block">${escHtml(genResult.yaml_str)}</div>
+              ${this._renderYamlBlock(genResult.yaml_str, "yaml-opt-after")}
             </div>
           </div>
           <div class="refine-input" style="margin-top:12px">
@@ -915,7 +1273,7 @@ class HaLlmAutomationPanel extends HTMLElement {
             <button class="btn btn-secondary btn-sm" id="btn-opt-refine">重新生成</button>
           </div>
           <div class="btn-row">
-            <button class="btn btn-success" id="btn-opt-save" ?disabled="${!genResult.parsed || this._loading}">
+            <button class="btn btn-success" id="btn-opt-save" ${!genResult.parsed || this._loading ? 'disabled' : ''}>
               💾 保存优化结果
             </button>
           </div>
@@ -924,20 +1282,22 @@ class HaLlmAutomationPanel extends HTMLElement {
     `;
   }
 
+  // ------------------------------------------------------------------
+  // Render: Consolidate Tab
+  // ------------------------------------------------------------------
+
   _renderConsolidate() {
     const plan = this._consolidatePlan;
-
     return `
       <div class="card">
         <div class="card-title">批量整合自动化</div>
-        <p style="color:var(--secondary-text-color,#9ca3af);margin:0 0 12px">
+        <p style="color:#9ca3af;margin:0 0 12px;font-size:13px">
           分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。
         </p>
-        <button class="btn btn-primary" id="btn-cons-analyze" ?disabled="${this._loading}">
+        <button class="btn btn-primary" id="btn-cons-analyze" ${this._loading ? 'disabled' : ''}>
           ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '开始分析全部自动化 ▶'}
         </button>
       </div>
-
       ${plan ? this._renderConsolidatePlan(plan) : ""}
     `;
   }
@@ -946,16 +1306,14 @@ class HaLlmAutomationPanel extends HTMLElement {
     const merges = plan.merge_groups || [];
     const fixes = plan.fix_items || [];
     const oks = plan.ok_items || [];
-
-    const approvedMerges = merges.filter((_, i) => this._consolidateApproved[`merge_${i}`] && !this._consolidateSkipped.has(`merge_${i}`));
-    const approvedFixes = fixes.filter((_, i) => this._consolidateApproved[`fix_${i}`] && !this._consolidateSkipped.has(`fix_${i}`));
+    const approvedCount = Object.keys(this._consolidateApproved).filter(k => !this._consolidateSkipped.has(k)).length;
 
     return `
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div class="card-title" style="margin:0">聚合方案</div>
-          <div style="font-size:12px;color:var(--secondary-text-color,#9ca3af)">
-            合并 ${merges.length} 组 · 修复 ${fixes.length} 项 · 无需修改 ${oks.length} 项
+          <div style="font-size:12px;color:#9ca3af">
+            合并 ${merges.length} · 修复 ${fixes.length} · 无需修改 ${oks.length}
           </div>
         </div>
 
@@ -969,13 +1327,27 @@ class HaLlmAutomationPanel extends HTMLElement {
               <div class="automation-header" id="cons-hdr-merge-${i}">
                 <span class="tag tag-merge">合并</span>
                 <span class="auto-title">场景：${escHtml(g.scenario || "")}</span>
-                <span style="font-size:11px;color:#9ca3af">${(g.aliases || []).join(" + ")}</span>
-                <span style="font-size:14px;color:#6b7280">▼</span>
+                <span style="font-size:11px;color:#9ca3af">${(g.aliases || []).slice(0,3).join(" + ")}${g.aliases?.length > 3 ? '…' : ''}</span>
+                <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
               </div>
               ${expanded ? `
                 <div class="auto-body">
-                  <p style="color:#9ca3af;font-size:13px;margin:0 0 8px">${escHtml(g.reason || "")}</p>
-                  <div class="yaml-block">${escHtml(g.merged_yaml || "")}</div>
+                  <p style="color:#9ca3af;font-size:12px;margin:0 0 8px">${escHtml(g.reason || "")}</p>
+                  ${(g.original_yamls || []).length > 0 ? `
+                    <div style="margin-bottom:10px">
+                      <div style="font-size:11px;font-weight:700;color:var(--secondary-text-color,#9ca3af);margin-bottom:6px">
+                        原始自动化（共 ${(g.original_yamls || []).length} 条，将被合并替换）：
+                      </div>
+                      ${(g.original_yamls || []).map((oy, oi) => `
+                        <div style="margin-bottom:6px">
+                          <div style="font-size:11px;color:#818cf8;margin-bottom:3px">[${oi + 1}] ${escHtml(oy.id)}</div>
+                          ${oy.yaml ? this._renderYamlBlock(oy.yaml, `cons-orig-merge-${i}-${oi}`) : '<div style="color:#6b7280;font-size:11px">（无法获取原始配置）</div>'}
+                        </div>
+                      `).join("")}
+                    </div>
+                    <div style="font-size:11px;font-weight:700;color:#818cf8;margin-bottom:6px">合并后：</div>
+                  ` : ""}
+                  ${this._renderYamlBlock(g.merged_yaml || "", `cons-yaml-merge-${i}`)}
                   <div class="refine-input" style="margin-top:8px">
                     <textarea id="cons-refine-merge-${i}" placeholder="输入修改意见..." rows="2"></textarea>
                     <button class="btn btn-secondary btn-sm" id="btn-cons-refine-merge-${i}">重新生成</button>
@@ -1000,12 +1372,24 @@ class HaLlmAutomationPanel extends HTMLElement {
               <div class="automation-header" id="cons-hdr-fix-${i}">
                 <span class="tag tag-fix">修复</span>
                 <span class="auto-title">${escHtml(f.alias || f.id)}</span>
-                <span style="font-size:11px;color:#f87171">${escHtml(f.issue || "")}</span>
-                <span style="font-size:14px;color:#6b7280">▼</span>
+                <span style="font-size:11px;color:#f87171">${escHtml((f.issue || "").slice(0, 50))}</span>
+                <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
               </div>
               ${expanded ? `
                 <div class="auto-body">
-                  <div class="yaml-block">${escHtml(f.fixed_yaml || "")}</div>
+                  <p style="color:#f87171;font-size:12px;margin:0 0 8px">问题：${escHtml(f.issue || "")}</p>
+                  ${f.original_yaml ? `
+                    <div class="diff-container">
+                      <div>
+                        <div class="diff-label">原始配置</div>
+                        ${this._renderYamlBlock(f.original_yaml, `cons-orig-fix-${i}`)}
+                      </div>
+                      <div>
+                        <div class="diff-label">修复后</div>
+                        ${this._renderYamlBlock(f.fixed_yaml || "", `cons-yaml-fix-${i}`)}
+                      </div>
+                    </div>
+                  ` : this._renderYamlBlock(f.fixed_yaml || "", `cons-yaml-fix-${i}`)}
                   <div class="refine-input" style="margin-top:8px">
                     <textarea id="cons-refine-fix-${i}" placeholder="输入修改意见..." rows="2"></textarea>
                     <button class="btn btn-secondary btn-sm" id="btn-cons-refine-fix-${i}">重新生成</button>
@@ -1021,63 +1405,195 @@ class HaLlmAutomationPanel extends HTMLElement {
         }).join("")}
 
         ${oks.length ? `
-          <div style="margin-top:8px;padding:8px 12px;background:rgba(74,222,128,0.05);border-radius:8px;font-size:12px;color:#4ade80">
-            ✓ ${oks.length} 条自动化无需修改：${oks.map(o => o.alias).join("、")}
+          <div style="padding:8px 12px;background:rgba(74,222,128,0.04);border-radius:8px;font-size:12px;color:#4ade80;margin-top:4px">
+            ✓ ${oks.length} 条无需修改：${oks.map(o => o.alias).join("、")}
           </div>
         ` : ""}
 
-        <div style="margin-top:16px;display:flex;justify-content:flex-end">
-          <button class="btn btn-success" id="btn-cons-execute" ?disabled="${this._loading || (approvedMerges.length === 0 && approvedFixes.length === 0)}">
-            ${this._loading ? '<span class="spinner"></span>' : '⚡'} 执行所有批准项 (${approvedMerges.length + approvedFixes.length})
+        <div style="margin-top:14px;display:flex;justify-content:flex-end">
+          <button class="btn btn-success" id="btn-cons-execute"
+            ${this._loading || approvedCount === 0 ? 'disabled' : ''}>
+            ${this._loading ? '<span class="spinner"></span>' : '⚡'} 执行所有批准项 (${approvedCount})
           </button>
         </div>
       </div>
     `;
   }
 
+  // ------------------------------------------------------------------
+  // Render: Config Tab
+  // ------------------------------------------------------------------
+
   _renderConfig() {
+    const c = this._configData;
+    if (!this._configLoaded) {
+      return `<div class="card"><div style="color:#9ca3af;text-align:center;padding:30px">加载配置中...</div></div>`;
+    }
+
+    const areaFilter = c.area_filter || [];
+    const labelFilter = c.label_filter || [];
+    const integFilter = c.integration_filter || [];
+
+    // Map area ids to names for display
+    const areaItems = this._areas.map(a => ({ label_id: a.area_id, name: a.name }));
+
     return `
       <div class="card">
-        <div class="card-title">LLM 配置说明</div>
-        <p style="color:var(--secondary-text-color,#9ca3af);margin:0">
-          LLM 接口配置在集成安装时设置。若需修改，请进入「集成」页面 → HA LLM Automation → 选项。
-        </p>
-        <div style="margin-top:12px">
-          <button class="btn btn-secondary" id="btn-reload-integ">重新加载配置</button>
+        <div class="card-title">LLM 接口配置</div>
+
+        <div class="form-row">
+          <label class="form-label">Provider</label>
+          <select id="cfg-provider">
+            ${["openai_compatible","openai","anthropic"].map(p =>
+              `<option value="${p}" ${(c.provider || "openai_compatible") === p ? "selected" : ""}>${p}</option>`
+            ).join("")}
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">API Key</label>
+          <div class="pw-wrapper">
+            <input type="${this._showApiKey ? 'text' : 'password'}" id="cfg-api-key"
+              value="${escHtml(c.api_key || "")}" placeholder="sk-..." style="padding-right:38px">
+            <button class="pw-toggle" id="btn-toggle-apikey">${this._showApiKey ? '🙈' : '👁'}</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">Base URL（openai_compatible 需填，如 https://api.xxx.com/v1）</label>
+          <input type="text" id="cfg-base-url" value="${escHtml(c.base_url || "")}" placeholder="https://api.openai.com/v1">
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">模型名称</label>
+          <input type="text" id="cfg-model" value="${escHtml(c.model || "gpt-4o")}" placeholder="gpt-4o">
+        </div>
+
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">Max Tokens</label>
+            <input type="number" id="cfg-max-tokens" value="${c.max_tokens || 8192}" min="512" max="32768">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Temperature (0.0–1.0)</label>
+            <input type="number" id="cfg-temperature" value="${c.temperature !== undefined ? c.temperature : 0.3}" min="0" max="1" step="0.05">
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">实体筛选（可选）</div>
+
+          <div class="form-row">
+            <label class="form-label">额外可见域（逗号分隔，如 notify,remote）</label>
+            <input type="text" id="cfg-extra-domains-input" value="${escHtml(c.extra_visible_domains || "")}" placeholder="notify,remote">
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">隐藏域（输入 domain + 回车）</label>
+            <div style="margin-top:0"><input type="text" id="cfg-hidden-domains" value="${escHtml(c.hidden_domains || "")}" placeholder="weather,person（逗号分隔）" style="font-size:12px"></div>
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">仅显示区域（选择后实体列表只含这些区域）</label>
+            ${this._renderMultiSelect(
+              "cfg-area", this._areas,
+              areaFilter, "name", "area_id",
+              this._areaDropOpen
+            )}
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">仅显示集成</label>
+            ${this._renderMultiSelect(
+              "cfg-integ",
+              this._integrations.map(s => ({label_id: s, name: s})),
+              integFilter, "name", "label_id",
+              this._integDropOpen
+            )}
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">仅显示标签</label>
+            ${this._renderMultiSelect(
+              "cfg-label", this._labels.map(l => ({label_id: l.label_id, name: l.name || l.label_id})),
+              labelFilter, "name", "label_id",
+              this._labelDropOpen
+            )}
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">高级选项</div>
+          <label class="checkbox-row">
+            <input type="checkbox" id="cfg-log-prompt" ${c.log_prompt ? 'checked' : ''}>
+            在日志中打印发给 LLM 的 Prompt 文本（紫色显示）
+          </label>
+          <label class="checkbox-row" style="margin-top:8px">
+            <input type="checkbox" id="cfg-use-docs" ${c.use_docs !== false ? 'checked' : ''}>
+            调用 LLM 时携带 HA 官方文档知识（缓存 7 天，关闭可跳过文档加载）
+          </label>
+        </div>
+
+        <div style="margin-top:18px">
+          <button class="btn btn-primary" id="btn-save-config">💾 保存配置</button>
         </div>
       </div>
     `;
   }
 
+  // ------------------------------------------------------------------
+  // Render: Knowledge/Backup Tab
+  // ------------------------------------------------------------------
+
   _renderKnowledge() {
+    const DOC_KEYS = [
+      "automation_basic", "automation_trigger", "automation_condition",
+      "automation_action", "templating", "scripts", "service_calls"
+    ];
+
     return `
       <div class="card">
         <div class="card-title">知识库文档</div>
-        <p style="color:var(--secondary-text-color,#9ca3af);margin:0 0 12px">
-          刷新 HA 官方文档缓存（automation、trigger、condition、action、scripts 等）。
-          文档 TTL 为 7 天，过期后自动重新抓取。
-        </p>
-        <button class="btn btn-primary" id="btn-refresh-docs" ?disabled="${this._loading}">
-          ${this._loading ? '<span class="spinner"></span> 刷新中...' : '刷新文档缓存'}
-        </button>
+        <ul class="doc-list">
+          ${DOC_KEYS.map(k => `
+            <li class="doc-item">
+              <span class="doc-key">${k}</span>
+              <button class="btn btn-secondary btn-sm" id="btn-preview-doc-${k}">预览</button>
+            </li>
+          `).join("")}
+        </ul>
+        ${this._docPreview.key ? `
+          <div style="margin-top:10px">
+            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px">
+              ${escHtml(this._docPreview.key)}${this._docPreview.truncated ? " (已截断至 5000 字符)" : ""}
+            </div>
+            <div class="doc-preview-area visible">${escHtml(this._docPreview.content || "")}</div>
+          </div>
+        ` : ""}
+        <div style="margin-top:14px">
+          <button class="btn btn-primary" id="btn-refresh-docs" ${this._loading ? 'disabled' : ''}>
+            ${this._loading ? '<span class="spinner"></span> 刷新中...' : '刷新文档缓存'}
+          </button>
+        </div>
       </div>
 
       <div class="card">
-        <div class="card-title">
-          备份管理
-          <button class="btn btn-secondary btn-sm" id="btn-load-backups" style="float:right">刷新列表</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div class="card-title" style="margin:0">备份管理</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="btn-load-backups">刷新列表</button>
+            <button class="btn btn-danger btn-sm" id="btn-clear-backups">🗑 清空全部</button>
+          </div>
         </div>
         ${this._backups.length === 0 ? `
-          <div style="color:var(--secondary-text-color,#9ca3af);text-align:center;padding:20px">
-            暂无备份记录
-          </div>
+          <div style="color:#6b7280;text-align:center;padding:20px;font-size:13px">暂无备份记录</div>
         ` : `
           <ul class="backup-list">
             ${this._backups.map((b, i) => `
               <li class="backup-item">
                 <div class="backup-info">
                   <div class="backup-name">${escHtml(b.name)}</div>
-                  <div class="backup-meta">${b.mtime} · ${b.count} 条 · ${b.size_kb}KB</div>
+                  <div class="backup-meta">${escHtml(b.mtime)} · ${b.count} 条 · ${b.size_kb}KB</div>
                 </div>
                 <button class="btn btn-secondary btn-sm" id="btn-restore-${i}">恢复</button>
               </li>
@@ -1088,6 +1604,10 @@ class HaLlmAutomationPanel extends HTMLElement {
     `;
   }
 
+  // ------------------------------------------------------------------
+  // Render: Log Panel
+  // ------------------------------------------------------------------
+
   _renderLogPanel() {
     return `
       <div class="log-panel">
@@ -1097,8 +1617,8 @@ class HaLlmAutomationPanel extends HTMLElement {
         </div>
         <div class="log-entries">
           ${this._logs.length === 0
-            ? '<div style="color:#4b5563;text-align:center;padding:20px">等待操作...</div>'
-            : this._logs.map(l => `<div class="log-entry">${escHtml(l)}</div>`).join("")
+            ? '<div style="color:#374151;text-align:center;padding:20px">等待操作...</div>'
+            : this._logs.map(l => `<div class="${l.cls}">${escHtml(l.text)}</div>`).join("")
           }
         </div>
       </div>
@@ -1111,11 +1631,11 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _render() {
     const tabs = [
-      { id: "create", label: "创建" },
-      { id: "optimize", label: "优化" },
-      { id: "consolidate", label: "聚合" },
-      { id: "config", label: "配置" },
-      { id: "knowledge", label: "知识库/备份" },
+      { id: "create", label: "✨ 创建" },
+      { id: "optimize", label: "🔧 优化" },
+      { id: "consolidate", label: "🔗 聚合" },
+      { id: "config", label: "⚙ 配置" },
+      { id: "knowledge", label: "📚 知识库/备份" },
     ];
 
     let mainContent = "";
@@ -1129,7 +1649,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       <style>${STYLES}</style>
       <div class="header">
         <h1>🤖 HA LLM Automation</h1>
-        ${this._loading ? '<span class="spinner"></span>' : ""}
+        ${this._loading ? '<span class="spinner" style="color:#818cf8"></span>' : ""}
       </div>
       <div class="tabs">
         ${tabs.map(t => `<div class="tab ${this._tab === t.id ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
@@ -1138,25 +1658,32 @@ class HaLlmAutomationPanel extends HTMLElement {
         <div class="main-area">${mainContent}</div>
         <div class="log-area">${this._renderLogPanel()}</div>
       </div>
+      <div class="toast-container"></div>
     `;
 
     this._bindEvents();
   }
 
   // ------------------------------------------------------------------
-  // Event binding (after each render)
+  // Event binding
   // ------------------------------------------------------------------
 
   _bindEvents() {
-    const $ = (id) => this.shadowRoot.getElementById(id);
+    const $ = id => this.shadowRoot.getElementById(id);
     const root = this.shadowRoot;
 
     // Tabs
     root.querySelectorAll(".tab").forEach(tab => {
       tab.addEventListener("click", () => {
+        const prevTab = this._tab;
         this._tab = tab.dataset.tab;
         if (this._tab === "knowledge") this._loadBackups();
-        if (this._tab === "optimize") this._loadAutomations();
+        if (this._tab === "optimize" && prevTab !== "optimize") this._loadAutomations();
+        if (this._tab === "consolidate" && prevTab !== "consolidate") this._loadAutomations();
+        if (this._tab === "config" && !this._configLoaded) {
+          Promise.all([this._loadConfig(), this._loadAreas(), this._loadLabels(), this._loadIntegrations()])
+            .then(() => this._render());
+        }
         this._render();
       });
     });
@@ -1165,48 +1692,56 @@ class HaLlmAutomationPanel extends HTMLElement {
     const clearLog = $("btn-clear-log");
     if (clearLog) clearLog.addEventListener("click", () => { this._logs = []; this._render(); });
 
-    // Create tab
-    const btnCreateStart = $("btn-create-start");
-    if (btnCreateStart) btnCreateStart.addEventListener("click", () => this._createStart());
+    // ==== Create tab ====
+    const btnCreate = $("btn-create-start");
+    if (btnCreate) btnCreate.addEventListener("click", () => this._createStart());
 
-    const btnCreateSave = $("btn-create-save");
-    if (btnCreateSave) btnCreateSave.addEventListener("click", () => this._createSaveAll());
+    const btnSave = $("btn-create-save");
+    if (btnSave) btnSave.addEventListener("click", () => this._createSaveAll());
 
-    const btnSelectAll = $("btn-create-select-all");
-    if (btnSelectAll) {
-      btnSelectAll.addEventListener("click", () => {
-        (this._createResult?.automations || []).forEach((item, i) => {
-          if (item.parsed) this._createApprovedItems.add(i);
-        });
-        this._render();
+    const btnSelAll = $("btn-create-select-all");
+    if (btnSelAll) btnSelAll.addEventListener("click", () => {
+      (this._createResult?.automations || []).forEach((item, i) => {
+        if (item.parsed) this._createChecked.add(i);
       });
-    }
+      this._render();
+    });
 
-    // Automation card expand/approve/skip/refine
+    const btnDeselAll = $("btn-create-deselect-all");
+    if (btnDeselAll) btnDeselAll.addEventListener("click", () => {
+      this._createChecked.clear();
+      this._render();
+    });
+
     if (this._createResult) {
       (this._createResult.automations || []).forEach((item, i) => {
+        // Header click → expand/collapse
         const hdr = $(`auto-hdr-${i}`);
-        if (hdr) hdr.addEventListener("click", () => {
-          const body = $(`auto-body-${i}`);
-          if (body) body.style.display = body.style.display === "none" ? "" : "none";
-        });
-
-        const btnApprove = $(`btn-approve-${i}`);
-        if (btnApprove) btnApprove.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this._createApprovedItems.add(i);
-          this._createSkippedItems.delete(i);
+        if (hdr) hdr.addEventListener("click", (e) => {
+          if (e.target.type === "checkbox") return;
+          if (this._createExpanded.has(i)) this._createExpanded.delete(i);
+          else this._createExpanded.add(i);
           this._render();
         });
 
-        const btnSkip = $(`btn-skip-${i}`);
-        if (btnSkip) btnSkip.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this._createSkippedItems.add(i);
-          this._createApprovedItems.delete(i);
+        // Checkbox
+        const chk = $(`auto-chk-${i}`);
+        if (chk) chk.addEventListener("change", () => {
+          if (chk.checked) this._createChecked.add(i);
+          else this._createChecked.delete(i);
           this._render();
         });
 
+        // Refine toggle
+        const btnRefineToggle = $(`btn-refine-toggle-${i}`);
+        if (btnRefineToggle) btnRefineToggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (this._createRefineVisible.has(i)) this._createRefineVisible.delete(i);
+          else this._createRefineVisible.add(i);
+          this._render();
+        });
+
+        // Refine submit
         const btnRefine = $(`btn-refine-${i}`);
         if (btnRefine) btnRefine.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -1215,35 +1750,34 @@ class HaLlmAutomationPanel extends HTMLElement {
       });
     }
 
-    // Optimize tab
-    const optSelect = $("opt-select");
-    if (optSelect) optSelect.addEventListener("change", () => {
-      this._optimizeSelectedId = optSelect.value;
+    // ==== Optimize tab ====
+    const optSel = $("opt-select");
+    if (optSel) optSel.addEventListener("change", () => {
+      this._optimizeSelectedId = optSel.value;
       this._optimizeAnalysis = null;
       this._optimizeGenResult = null;
       this._render();
     });
 
-    const btnOptAnalyze = $("btn-opt-analyze");
-    if (btnOptAnalyze) btnOptAnalyze.addEventListener("click", () => this._optimizeAnalyze());
+    const btnOptAna = $("btn-opt-analyze");
+    if (btnOptAna) btnOptAna.addEventListener("click", () => this._optimizeAnalyze());
 
-    const btnOptGenerate = $("btn-opt-generate");
-    if (btnOptGenerate) btnOptGenerate.addEventListener("click", () => this._optimizeGenerate());
+    const btnOptGen = $("btn-opt-generate");
+    if (btnOptGen) btnOptGen.addEventListener("click", () => this._optimizeGenerate());
 
-    const btnOptRefine = $("btn-opt-refine");
-    if (btnOptRefine) btnOptRefine.addEventListener("click", () => this._optimizeRefine());
+    const btnOptRef = $("btn-opt-refine");
+    if (btnOptRef) btnOptRef.addEventListener("click", () => this._optimizeRefine());
 
     const btnOptSave = $("btn-opt-save");
     if (btnOptSave) btnOptSave.addEventListener("click", () => this._optimizeSave());
 
-    // Consolidate tab
-    const btnConsAnalyze = $("btn-cons-analyze");
-    if (btnConsAnalyze) btnConsAnalyze.addEventListener("click", () => this._consolidateAnalyze());
+    // ==== Consolidate tab ====
+    const btnConsAna = $("btn-cons-analyze");
+    if (btnConsAna) btnConsAna.addEventListener("click", () => this._consolidateAnalyze());
 
     const btnConsExec = $("btn-cons-execute");
     if (btnConsExec) btnConsExec.addEventListener("click", () => this._consolidateExecute());
 
-    // Consolidate card headers (expand)
     if (this._consolidatePlan) {
       (this._consolidatePlan.merge_groups || []).forEach((g, i) => {
         const hdr = $(`cons-hdr-merge-${i}`);
@@ -1252,22 +1786,22 @@ class HaLlmAutomationPanel extends HTMLElement {
           this._consolidateExpandedYaml[key] = !this._consolidateExpandedYaml[key];
           this._render();
         });
-        const btnApprove = $(`btn-cons-approve-merge-${i}`);
-        if (btnApprove) btnApprove.addEventListener("click", (e) => {
+        const btnApp = $(`btn-cons-approve-merge-${i}`);
+        if (btnApp) btnApp.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateApproved[`merge_${i}`] = this._consolidatePlan.merge_groups[i];
           this._consolidateSkipped.delete(`merge_${i}`);
           this._render();
         });
-        const btnSkip = $(`btn-cons-skip-merge-${i}`);
-        if (btnSkip) btnSkip.addEventListener("click", (e) => {
+        const btnSkp = $(`btn-cons-skip-merge-${i}`);
+        if (btnSkp) btnSkp.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateSkipped.add(`merge_${i}`);
           delete this._consolidateApproved[`merge_${i}`];
           this._render();
         });
-        const btnRefine = $(`btn-cons-refine-merge-${i}`);
-        if (btnRefine) btnRefine.addEventListener("click", (e) => {
+        const btnRef = $(`btn-cons-refine-merge-${i}`);
+        if (btnRef) btnRef.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateRefine("merge", i, g.merged_yaml);
         });
@@ -1280,44 +1814,111 @@ class HaLlmAutomationPanel extends HTMLElement {
           this._consolidateExpandedYaml[key] = !this._consolidateExpandedYaml[key];
           this._render();
         });
-        const btnApprove = $(`btn-cons-approve-fix-${i}`);
-        if (btnApprove) btnApprove.addEventListener("click", (e) => {
+        const btnApp = $(`btn-cons-approve-fix-${i}`);
+        if (btnApp) btnApp.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateApproved[`fix_${i}`] = this._consolidatePlan.fix_items[i];
           this._consolidateSkipped.delete(`fix_${i}`);
           this._render();
         });
-        const btnSkip = $(`btn-cons-skip-fix-${i}`);
-        if (btnSkip) btnSkip.addEventListener("click", (e) => {
+        const btnSkp = $(`btn-cons-skip-fix-${i}`);
+        if (btnSkp) btnSkp.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateSkipped.add(`fix_${i}`);
           delete this._consolidateApproved[`fix_${i}`];
           this._render();
         });
-        const btnRefine = $(`btn-cons-refine-fix-${i}`);
-        if (btnRefine) btnRefine.addEventListener("click", (e) => {
+        const btnRef = $(`btn-cons-refine-fix-${i}`);
+        if (btnRef) btnRef.addEventListener("click", (e) => {
           e.stopPropagation();
           this._consolidateRefine("fix", i, f.fixed_yaml);
         });
       });
     }
 
-    // Knowledge/Backup tab
-    const btnRefreshDocs = $("btn-refresh-docs");
-    if (btnRefreshDocs) btnRefreshDocs.addEventListener("click", () => this._refreshDocs());
+    // ==== Config tab ====
+    const btnToggleApiKey = $("btn-toggle-apikey");
+    if (btnToggleApiKey) btnToggleApiKey.addEventListener("click", () => {
+      this._showApiKey = !this._showApiKey;
+      this._render();
+    });
 
-    const btnLoadBackups = $("btn-load-backups");
-    if (btnLoadBackups) btnLoadBackups.addEventListener("click", () => this._loadBackups());
+    const btnSaveCfg = $("btn-save-config");
+    if (btnSaveCfg) btnSaveCfg.addEventListener("click", () => this._saveConfig());
+
+    // Multi-select dropdowns (area / label / integ)
+    const msConfigs = [
+      { id: "cfg-area", key: "area_filter", valueKey: "area_id", open: "_areaDropOpen" },
+      { id: "cfg-integ", key: "integration_filter", valueKey: "label_id", open: "_integDropOpen" },
+      { id: "cfg-label", key: "label_filter", valueKey: "label_id", open: "_labelDropOpen" },
+    ];
+    for (const mc of msConfigs) {
+      const toggleBtn = $(`${mc.id}-toggle`);
+      if (toggleBtn) toggleBtn.addEventListener("click", () => {
+        this[mc.open] = !this[mc.open];
+        this._render();
+      });
+
+      root.querySelectorAll(`[data-ms-id="${mc.id}"]`).forEach(chkEl => {
+        chkEl.addEventListener("change", () => {
+          const val = chkEl.dataset.msVal;
+          const current = [...(this._configData[mc.key] || [])];
+          if (chkEl.checked) {
+            if (!current.includes(val)) current.push(val);
+          } else {
+            const idx = current.indexOf(val);
+            if (idx >= 0) current.splice(idx, 1);
+          }
+          this._configData[mc.key] = current;
+          this._render();
+        });
+      });
+
+      root.querySelectorAll(`[data-ms-remove="${mc.id}"]`).forEach(btn => {
+        btn.addEventListener("click", () => {
+          const val = btn.dataset.msVal;
+          const current = [...(this._configData[mc.key] || [])];
+          const idx = current.indexOf(val);
+          if (idx >= 0) {
+            current.splice(idx, 1);
+            this._configData[mc.key] = current;
+            this._render();
+          }
+        });
+      });
+    }
+
+    // ==== Knowledge/Backup tab ====
+    const btnRefDocs = $("btn-refresh-docs");
+    if (btnRefDocs) btnRefDocs.addEventListener("click", () => this._refreshDocs());
+
+    const btnLoadBkp = $("btn-load-backups");
+    if (btnLoadBkp) btnLoadBkp.addEventListener("click", () => this._loadBackups());
+
+    const btnClearBkp = $("btn-clear-backups");
+    if (btnClearBkp) btnClearBkp.addEventListener("click", () => this._clearBackups());
 
     this._backups.forEach((b, i) => {
       const btnRestore = $(`btn-restore-${i}`);
       if (btnRestore) btnRestore.addEventListener("click", () => this._restoreBackup(b.file));
     });
 
-    // Config tab
-    const btnReloadInteg = $("btn-reload-integ");
-    if (btnReloadInteg) btnReloadInteg.addEventListener("click", () => {
-      window.location.reload();
+    // Doc preview buttons
+    root.querySelectorAll("[id^='btn-preview-doc-']").forEach(btn => {
+      const key = btn.id.replace("btn-preview-doc-", "");
+      btn.addEventListener("click", () => this._previewDoc(key));
+    });
+
+    // YAML copy buttons
+    root.querySelectorAll(".yaml-copy-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const yaml = btn.dataset.yaml || "";
+        navigator.clipboard.writeText(yaml).then(() => {
+          this._toast("已复制到剪贴板", "success");
+        }).catch(() => {
+          this._toast("复制失败（请手动选择复制）", "error");
+        });
+      });
     });
   }
 }

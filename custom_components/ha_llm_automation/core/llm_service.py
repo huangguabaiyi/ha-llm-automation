@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Callable
 
 import yaml
@@ -16,14 +17,19 @@ from homeassistant.core import HomeAssistant
 
 from ..backup.manager import BackupManager
 from ..const import (
+    CONF_AREA_FILTER,
     CONF_EXTRA_VISIBLE_DOMAINS,
     CONF_HIDDEN_DOMAINS,
+    CONF_INTEGRATION_FILTER,
+    CONF_LABEL_FILTER,
     CONF_LLM_API_KEY,
     CONF_LLM_BASE_URL,
     CONF_LLM_MAX_TOKENS,
     CONF_LLM_MODEL,
     CONF_LLM_PROVIDER,
     CONF_LLM_TEMPERATURE,
+    CONF_LOG_PROMPT,
+    CONF_USE_DOCS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     DOMAIN,
@@ -52,16 +58,19 @@ LogCallback = Callable[[str], None]
 
 
 def _get_llm_client(config_entry: ConfigEntry):
-    """从 config_entry 构建 LLM client 配置并创建实例"""
-    data = {**config_entry.data, **config_entry.options}
+    """从 config_entry 构建 LLM client 配置并创建实例（只读 entry.options）"""
+    opts = config_entry.options
+    api_key = opts.get(CONF_LLM_API_KEY, "").strip()
+    if not api_key:
+        raise RuntimeError("请先在面板配置页设置 LLM API Key")
     llm_config = {
-        "provider": data.get(CONF_LLM_PROVIDER, "openai_compatible"),
-        "api_key": data.get(CONF_LLM_API_KEY, ""),
-        "model": data.get(CONF_LLM_MODEL, "gpt-4o"),
-        "max_tokens": data.get(CONF_LLM_MAX_TOKENS, DEFAULT_MAX_TOKENS),
-        "temperature": data.get(CONF_LLM_TEMPERATURE, DEFAULT_TEMPERATURE),
+        "provider": opts.get(CONF_LLM_PROVIDER, "openai_compatible"),
+        "api_key": api_key,
+        "model": opts.get(CONF_LLM_MODEL, "gpt-4o"),
+        "max_tokens": opts.get(CONF_LLM_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+        "temperature": opts.get(CONF_LLM_TEMPERATURE, DEFAULT_TEMPERATURE),
     }
-    base_url = data.get(CONF_LLM_BASE_URL, "").strip()
+    base_url = opts.get(CONF_LLM_BASE_URL, "").strip()
     if base_url:
         llm_config["base_url"] = base_url
     return create_client(llm_config)
@@ -69,12 +78,100 @@ def _get_llm_client(config_entry: ConfigEntry):
 
 def _get_visible_domains(config_entry: ConfigEntry) -> set[str]:
     """从 config_entry 计算最终可见 domain 集合"""
-    data = {**config_entry.data, **config_entry.options}
-    extra_str = data.get(CONF_EXTRA_VISIBLE_DOMAINS, "") or ""
-    hidden_str = data.get(CONF_HIDDEN_DOMAINS, "") or ""
+    opts = config_entry.options
+    extra_str = opts.get(CONF_EXTRA_VISIBLE_DOMAINS, "") or ""
+    hidden_str = opts.get(CONF_HIDDEN_DOMAINS, "") or ""
     extra = {d.strip() for d in extra_str.split(",") if d.strip()}
     hidden = {d.strip() for d in hidden_str.split(",") if d.strip()}
     return (DEFAULT_VISIBLE_DOMAINS | extra) - hidden
+
+
+def _get_entity_filters(config_entry: ConfigEntry) -> dict:
+    """从 config_entry 获取实体过滤参数"""
+    opts = config_entry.options
+    return {
+        "area_filter": opts.get(CONF_AREA_FILTER) or None,
+        "label_filter": opts.get(CONF_LABEL_FILTER) or None,
+        "integration_filter": opts.get(CONF_INTEGRATION_FILTER) or None,
+    }
+
+
+def _maybe_log_prompt(config_entry: ConfigEntry, log_callback: LogCallback, prompt: str) -> None:
+    """若启用了 log_prompt 选项，向前端推送 [PROMPT] 日志条目"""
+    if config_entry.options.get(CONF_LOG_PROMPT):
+        truncated = prompt[:3000] + ("...(截断)" if len(prompt) > 3000 else "")
+        log_callback(f"[PROMPT] {truncated}")
+
+
+def _should_use_docs(config_entry: ConfigEntry) -> bool:
+    """从 options 读取是否启用知识库文档（默认 True）"""
+    return bool(config_entry.options.get(CONF_USE_DOCS, True))
+
+
+def _load_docs_with_status(
+    fetcher: DocFetcher,
+    keys: list[str],
+) -> tuple[dict[str, str], bool, list[str]]:
+    """同步加载文档，同时返回缓存状态（在 executor 中调用，不调用 log_callback）。
+    返回 (docs, all_cached, missing_keys)"""
+    cached_keys = {c["key"] for c in fetcher.list_cached() if not c["expired"]}
+    needed = set(keys)
+    missing = sorted(needed - cached_keys)
+    docs = fetcher.get_preset_docs(keys)
+    return docs, len(missing) == 0, missing
+
+
+def _extract_json(text: str) -> dict | None:
+    """从 LLM 回复中尝试提取 JSON 对象（容错处理 markdown 包裹和截断）"""
+    text = text.strip()
+
+    # 1. 直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. 从 markdown 代码块中提取
+    m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 找到 JSON 对象起始位置
+    start = text.find("{")
+    if start < 0:
+        return None
+    json_text = text[start:]
+
+    # 4. 尝试常见截断后缀（针对聚合 JSON 的嵌套结构）
+    for suffix in ('"}]}]}', '"]}]}', '"}]}', '"]}', ']}', '}'):
+        try:
+            return json.loads(json_text + suffix)
+        except json.JSONDecodeError:
+            pass
+
+    # 5. 利用 JSONDecodeError.pos 定位截断点，在其前 300 字符内找最后完整项
+    try:
+        json.loads(json_text)
+    except json.JSONDecodeError as e:
+        err_pos = min(e.pos, len(json_text))
+        scan_start = max(0, err_pos - 300)
+        for i in range(err_pos, scan_start, -1):
+            if json_text[i - 1] in ("}", "]"):
+                partial = json_text[:i]
+                opens = partial.count("{") - partial.count("}")
+                arr_opens = partial.count("[") - partial.count("]")
+                if opens < 0 or arr_opens < 0:
+                    continue
+                closer = "}" * opens
+                try:
+                    return json.loads(partial + closer)
+                except json.JSONDecodeError:
+                    pass
+
+    return None
 
 
 def _get_doc_fetcher(hass: HomeAssistant) -> DocFetcher:
@@ -110,7 +207,7 @@ async def run_create(
     config_entry: ConfigEntry,
     requirement: str,
     log_callback: LogCallback,
-    use_docs: bool = True,
+    use_docs: bool | None = None,  # None = 读取 entry.options
 ) -> dict:
     """
     创建自动化：可行性检查 + YAML 生成。
@@ -120,23 +217,29 @@ async def run_create(
     bridge = _get_bridge(hass, config_entry)
     llm = _get_llm_async_wrapper(hass, _get_llm_client(config_entry))
     visible_domains = _get_visible_domains(config_entry)
+    entity_filters = _get_entity_filters(config_entry)
 
     log_callback("正在获取实体列表...")
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
         log_callback(f"已获取 {len(entities)} 个实体")
     except Exception as e:
         log_callback(f"获取实体失败（{e}），继续生成")
         entities = []
 
     docs: dict[str, str] = {}
-    if use_docs:
-        log_callback("加载 HA 文档知识...")
+    effective_use_docs = use_docs if use_docs is not None else _should_use_docs(config_entry)
+    if effective_use_docs:
         try:
             fetcher = _get_doc_fetcher(hass)
-            docs = await hass.async_add_executor_job(
-                lambda: fetcher.get_preset_docs(["automation_basic", "automation_trigger", "automation_action"])
+            _keys = ["automation_basic", "automation_trigger", "automation_action"]
+            docs, all_cached, missing = await hass.async_add_executor_job(
+                lambda: _load_docs_with_status(fetcher, _keys)
             )
+            if all_cached:
+                log_callback("读取文档缓存（无需联网）")
+            else:
+                log_callback(f"加载 HA 文档知识（{', '.join(missing)} 需从网络更新）...")
             log_callback("文档加载完成")
         except Exception as e:
             log_callback(f"文档加载失败（{e}），跳过")
@@ -146,6 +249,7 @@ async def run_create(
     if entities:
         log_callback("Step 1/2 — 分析需求可行性...")
         feasibility_prompt = build_feasibility_prompt(entities, visible_domains=visible_domains)
+        _maybe_log_prompt(config_entry, log_callback, feasibility_prompt)
         try:
             resp = await llm(
                 messages=[{"role": "user", "content": requirement}],
@@ -175,6 +279,7 @@ async def run_create(
 
     system_prompt = build_system_prompt(docs, filtered_entities, visible_domains=visible_domains)
     log_callback("Step 2/2 — AI 生成 YAML...")
+    _maybe_log_prompt(config_entry, log_callback, system_prompt)
     try:
         response = await llm(
             messages=[{"role": "user", "content": requirement}],
@@ -233,9 +338,10 @@ async def run_create_refine(
     """
     llm = _get_llm_async_wrapper(hass, _get_llm_client(config_entry))
     bridge = _get_bridge(hass, config_entry)
+    entity_filters = _get_entity_filters(config_entry)
 
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
         valid_ids = {e["entity_id"] for e in entities}
     except Exception:
         valid_ids = set()
@@ -335,6 +441,7 @@ async def run_optimize_analyze(
     bridge = _get_bridge(hass, config_entry)
     llm = _get_llm_async_wrapper(hass, _get_llm_client(config_entry))
     visible_domains = _get_visible_domains(config_entry)
+    entity_filters = _get_entity_filters(config_entry)
 
     log_callback("获取自动化配置...")
     try:
@@ -346,12 +453,13 @@ async def run_optimize_analyze(
 
     log_callback("获取实体列表...")
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
     except Exception:
         entities = []
 
     log_callback("Step 1/2 — LLM 分析意图...")
     analysis_prompt = build_optimize_analysis_prompt(automation_yaml, entities, visible_domains=visible_domains)
+    _maybe_log_prompt(config_entry, log_callback, analysis_prompt)
     try:
         resp = await llm(
             messages=[{"role": "user", "content": "请分析这条自动化并返回 JSON 格式的分析结果。"}],
@@ -386,20 +494,27 @@ async def run_optimize_generate(
     bridge = _get_bridge(hass, config_entry)
     llm = _get_llm_async_wrapper(hass, _get_llm_client(config_entry))
     visible_domains = _get_visible_domains(config_entry)
+    entity_filters = _get_entity_filters(config_entry)
 
-    log_callback("加载文档知识...")
     docs: dict[str, str] = {}
-    try:
-        fetcher = _get_doc_fetcher(hass)
-        docs = await hass.async_add_executor_job(
-            lambda: fetcher.get_preset_docs(["automation_basic", "automation_trigger", "automation_action"])
-        )
-    except Exception:
-        pass
+    if _should_use_docs(config_entry):
+        try:
+            fetcher = _get_doc_fetcher(hass)
+            _keys = ["automation_basic", "automation_trigger", "automation_action"]
+            docs, all_cached, missing = await hass.async_add_executor_job(
+                lambda: _load_docs_with_status(fetcher, _keys)
+            )
+            if all_cached:
+                log_callback("读取文档缓存（无需联网）")
+            else:
+                log_callback(f"加载 HA 文档知识（{', '.join(missing)} 需从网络更新）...")
+            log_callback("文档加载完成")
+        except Exception as e:
+            log_callback(f"文档加载失败（{e}），跳过")
 
     log_callback("获取实体列表...")
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
         valid_ids = {e["entity_id"] for e in entities}
     except Exception:
         entities = []
@@ -409,6 +524,7 @@ async def run_optimize_generate(
         automation_yaml, analysis, entities, docs, visible_domains=visible_domains
     )
     log_callback("Step 2/2 — 生成优化 YAML...")
+    _maybe_log_prompt(config_entry, log_callback, system_prompt)
     try:
         response = await llm(
             messages=[{"role": "user", "content": "请生成优化后的完整自动化 YAML 配置。"}],
@@ -521,24 +637,33 @@ async def run_consolidate_analyze(
 
     log_callback(f"获取到 {len(automations_data)} 条可分析的自动化，开始 LLM 分析...")
 
+    entity_filters = _get_entity_filters(config_entry)
     log_callback("获取实体列表...")
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
     except Exception:
         entities = []
 
     prompt_data = [{"id": d["id"], "alias": d["alias"], "yaml_str": d["yaml_str"]} for d in automations_data]
     consolidate_prompt = build_consolidate_prompt(prompt_data, entities, visible_domains=visible_domains)
+    _maybe_log_prompt(config_entry, log_callback, consolidate_prompt)
     try:
         resp = await llm(
             messages=[{"role": "user", "content": "请分析以上自动化并返回 JSON 格式的整合方案。"}],
             system=consolidate_prompt,
         )
-        plan = json.loads(resp.strip())
-    except json.JSONDecodeError:
-        raise RuntimeError(f"LLM 返回了非 JSON 格式：{resp[:300]}")
     except Exception as e:
         raise RuntimeError(f"LLM 分析失败：{e}") from e
+
+    plan = _extract_json(resp)
+    if plan is None:
+        raise RuntimeError(f"LLM 返回了非 JSON 格式：{resp[:300]}")
+    if not isinstance(plan, dict):
+        raise RuntimeError(f"LLM 返回了非对象 JSON：{resp[:300]}")
+    # 容错：确保必要的键存在
+    plan.setdefault("merge_groups", [])
+    plan.setdefault("fix_items", [])
+    plan.setdefault("ok_items", [])
 
     log_callback(
         f"分析完成：{len(plan.get('merge_groups', []))} 组合并，"
@@ -570,20 +695,23 @@ async def run_consolidate_refine(
     bridge = _get_bridge(hass, config_entry)
     llm = _get_llm_async_wrapper(hass, _get_llm_client(config_entry))
     visible_domains = _get_visible_domains(config_entry)
+    entity_filters = _get_entity_filters(config_entry)
 
     try:
-        entities = await bridge.get_entities()
+        entities = await bridge.get_entities(**entity_filters)
     except Exception:
         entities = []
 
     docs: dict[str, str] = {}
-    try:
-        fetcher = _get_doc_fetcher(hass)
-        docs = await hass.async_add_executor_job(
-            lambda: fetcher.get_preset_docs(["automation_basic", "automation_trigger"])
-        )
-    except Exception:
-        pass
+    if _should_use_docs(config_entry):
+        try:
+            fetcher = _get_doc_fetcher(hass)
+            _keys = ["automation_basic", "automation_trigger"]
+            docs, _, _ = await hass.async_add_executor_job(
+                lambda: _load_docs_with_status(fetcher, _keys)
+            )
+        except Exception:
+            pass
 
     system_prompt = build_system_prompt(docs, entities, visible_domains=visible_domains)
     modify_msg = (

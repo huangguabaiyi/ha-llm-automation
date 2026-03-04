@@ -81,14 +81,33 @@ class HABridge:
             for device in registry.devices.values()
         ]
 
+    async def get_labels(self) -> list[dict]:
+        """获取标签注册表"""
+        try:
+            from homeassistant.helpers import label_registry as lr
+            registry = lr.async_get(self._hass)
+            return [{"label_id": l.label_id, "name": l.name} for l in registry.labels.values()]
+        except Exception:
+            return []
+
+    async def get_entity_platforms(self) -> list[str]:
+        """获取所有集成平台名称列表"""
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(self._hass)
+        return sorted({e.platform for e in registry.entities.values() if e.platform})
+
     async def get_entities(
         self,
         extra_visible_domains: set[str] | None = None,
         hidden_domains: set[str] | None = None,
+        area_filter: list[str] | None = None,
+        label_filter: list[str] | None = None,
+        integration_filter: list[str] | None = None,
     ) -> list[dict]:
         """
         三步合一：注册表 → 过滤 → 注入区域 → 返回实体列表。
         返回格式与 cli_tool/main.py 的 get_entities() 一致。
+        支持额外的 area_filter / label_filter / integration_filter 过滤。
         """
         # 获取注册表数据
         try:
@@ -110,6 +129,22 @@ class HABridge:
         area_map: dict[str, str] = {}
         exclude_ids: set[str] = set()
 
+        # 用于额外过滤的辅助映射
+        entity_area_id: dict[str, str] = {}  # entity_id -> area_id (raw)
+        entity_labels: dict[str, set[str]] = {}  # entity_id -> set of label_ids
+        entity_platform: dict[str, str] = {}  # entity_id -> platform
+
+        # 从实体注册表获取 labels 和 platform（需要原始对象）
+        try:
+            from homeassistant.helpers import entity_registry as er
+            er_registry = er.async_get(self._hass)
+            for e in er_registry.entities.values():
+                entity_platform[e.entity_id] = e.platform or ""
+                if hasattr(e, "labels"):
+                    entity_labels[e.entity_id] = set(e.labels) if e.labels else set()
+        except Exception:
+            pass
+
         for ent in entities_raw:
             eid = ent.get("entity_id", "")
             if not eid:
@@ -126,6 +161,7 @@ class HABridge:
             area_id = ent.get("area_id") or device_area.get(ent.get("device_id", ""), "")
             if area_id:
                 area_map[eid] = area_id_to_name.get(area_id, area_id)
+                entity_area_id[eid] = area_id
 
         # 从 states 获取实体
         all_states = await self.get_all_states()
@@ -139,6 +175,11 @@ class HABridge:
         }
         _SKIP_STATES = {"unavailable", "unknown"}
 
+        # 准备过滤集合
+        area_filter_set: set[str] | None = set(area_filter) if area_filter else None
+        label_filter_set: set[str] | None = set(label_filter) if label_filter else None
+        integration_filter_set: set[str] | None = set(integration_filter) if integration_filter else None
+
         entities: list[dict] = []
         for s in all_states:
             entity_id = s.get("entity_id", "")
@@ -147,6 +188,24 @@ class HABridge:
             state_val = s.get("state", "")
             if state_val in _SKIP_STATES:
                 continue
+
+            # 区域过滤
+            if area_filter_set is not None:
+                eid_area = entity_area_id.get(entity_id, "")
+                if eid_area not in area_filter_set:
+                    continue
+
+            # 标签过滤
+            if label_filter_set is not None:
+                eid_labels = entity_labels.get(entity_id, set())
+                if not eid_labels.intersection(label_filter_set):
+                    continue
+
+            # 集成过滤
+            if integration_filter_set is not None:
+                eid_platform = entity_platform.get(entity_id, "")
+                if eid_platform not in integration_filter_set:
+                    continue
 
             domain = entity_id.split(".")[0] if "." in entity_id else ""
             attrs = s.get("attributes", {})

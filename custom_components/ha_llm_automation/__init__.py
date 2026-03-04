@@ -18,7 +18,26 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, PANEL_ICON, PANEL_NAME, PANEL_TITLE, WS_EVENT_LOG
+from .const import (
+    CONF_AREA_FILTER,
+    CONF_EXTRA_VISIBLE_DOMAINS,
+    CONF_HIDDEN_DOMAINS,
+    CONF_INTEGRATION_FILTER,
+    CONF_LABEL_FILTER,
+    CONF_LLM_API_KEY,
+    CONF_LLM_BASE_URL,
+    CONF_LLM_MAX_TOKENS,
+    CONF_LLM_MODEL,
+    CONF_LLM_PROVIDER,
+    CONF_LLM_TEMPERATURE,
+    CONF_LOG_PROMPT,
+    CONF_USE_DOCS,
+    DOMAIN,
+    PANEL_ICON,
+    PANEL_NAME,
+    PANEL_TITLE,
+    WS_EVENT_LOG,
+)
 from .core.ha_bridge import create_ha_bridge
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,9 +51,25 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+_LLM_KEYS = [
+    CONF_LLM_PROVIDER, CONF_LLM_API_KEY, CONF_LLM_BASE_URL,
+    CONF_LLM_MODEL, CONF_LLM_MAX_TOKENS, CONF_LLM_TEMPERATURE,
+]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """配置条目加载"""
     hass.data.setdefault(DOMAIN, {})
+
+    # 旧配置迁移：将 entry.data 中的 LLM 字段移至 entry.options
+    migrate = {k: v for k, v in entry.data.items() if k in _LLM_KEYS}
+    if migrate:
+        _LOGGER.info("检测到旧版 LLM 配置，迁移到 options...")
+        hass.config_entries.async_update_entry(
+            entry,
+            data={k: v for k, v in entry.data.items() if k not in _LLM_KEYS},
+            options={**migrate, **entry.options},  # options 优先级更高
+        )
 
     # 创建 HABridge（生成内部 access token）
     try:
@@ -126,6 +161,11 @@ def _register_websocket_commands(hass: HomeAssistant) -> None:
         ws_list_backups,
         ws_restore_backup,
         ws_subscribe_log,
+        ws_get_areas,
+        ws_get_labels,
+        ws_get_integrations,
+        ws_clear_backups,
+        ws_preview_doc,
     ]
     for cmd in cmds:
         websocket_api.async_register_command(hass, cmd)
@@ -156,24 +196,30 @@ def _make_log_cb(hass: HomeAssistant, session_id: str):
 })
 @callback
 def ws_get_config(hass, connection, msg):
-    """获取当前 LLM 配置"""
+    """获取当前 LLM 配置（api_key 原文返回，前端用 password input 展示）"""
     entry = _get_entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_configured", "尚未配置")
         return
-    data = {**entry.data, **entry.options}
-    # 不返回 api_key 明文（用 *** 代替）
-    safe_data = {k: ("***" if "key" in k.lower() else v) for k, v in data.items()}
-    connection.send_result(msg["id"], {"config": safe_data})
+    # 只返回 options 中的配置（新架构全部存在 options）
+    connection.send_result(msg["id"], {"config": dict(entry.options)})
 
 
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/save_config",
-    vol.Optional("model"): str,
-    vol.Optional("max_tokens"): int,
-    vol.Optional("temperature"): float,
-    vol.Optional("extra_visible_domains"): str,
-    vol.Optional("hidden_domains"): str,
+    vol.Optional(CONF_LLM_PROVIDER): str,
+    vol.Optional(CONF_LLM_API_KEY): str,
+    vol.Optional(CONF_LLM_BASE_URL): str,
+    vol.Optional(CONF_LLM_MODEL): str,
+    vol.Optional(CONF_LLM_MAX_TOKENS): int,
+    vol.Optional(CONF_LLM_TEMPERATURE): float,
+    vol.Optional(CONF_EXTRA_VISIBLE_DOMAINS): str,
+    vol.Optional(CONF_HIDDEN_DOMAINS): str,
+    vol.Optional(CONF_LOG_PROMPT): bool,
+    vol.Optional(CONF_USE_DOCS): bool,
+    vol.Optional(CONF_AREA_FILTER): list,
+    vol.Optional(CONF_LABEL_FILTER): list,
+    vol.Optional(CONF_INTEGRATION_FILTER): list,
 })
 @callback
 def ws_save_config(hass, connection, msg):
@@ -182,7 +228,12 @@ def ws_save_config(hass, connection, msg):
     if entry is None:
         connection.send_error(msg["id"], "not_configured", "尚未配置")
         return
-    keys = ["model", "max_tokens", "temperature", "extra_visible_domains", "hidden_domains"]
+    keys = [
+        CONF_LLM_PROVIDER, CONF_LLM_API_KEY, CONF_LLM_BASE_URL, CONF_LLM_MODEL,
+        CONF_LLM_MAX_TOKENS, CONF_LLM_TEMPERATURE,
+        CONF_EXTRA_VISIBLE_DOMAINS, CONF_HIDDEN_DOMAINS, CONF_LOG_PROMPT, CONF_USE_DOCS,
+        CONF_AREA_FILTER, CONF_LABEL_FILTER, CONF_INTEGRATION_FILTER,
+    ]
     new_options = {**entry.options}
     for k in keys:
         if k in msg:
@@ -200,7 +251,7 @@ def ws_save_config(hass, connection, msg):
 })
 @websocket_api.async_response
 async def ws_get_entities(hass, connection, msg):
-    """获取实体列表"""
+    """获取实体列表（从 options 读取过滤参数）"""
     entry = _get_entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_configured", "尚未配置")
@@ -208,7 +259,12 @@ async def ws_get_entities(hass, connection, msg):
     from .core.ha_bridge import HABridge
     bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
     try:
-        entities = await bridge.get_entities()
+        opts = entry.options
+        entities = await bridge.get_entities(
+            area_filter=opts.get(CONF_AREA_FILTER) or None,
+            label_filter=opts.get(CONF_LABEL_FILTER) or None,
+            integration_filter=opts.get(CONF_INTEGRATION_FILTER) or None,
+        )
         connection.send_result(msg["id"], {"entities": entities})
     except Exception as e:
         connection.send_error(msg["id"], "error", str(e))
@@ -273,7 +329,7 @@ async def ws_get_automation_config(hass, connection, msg):
     vol.Required("type"): f"{DOMAIN}/create_start",
     vol.Required("requirement"): str,
     vol.Required("session_id"): str,
-    vol.Optional("use_docs", default=True): bool,
+    vol.Optional("use_docs"): bool,  # None = 读取 config_entry.options
 })
 @websocket_api.async_response
 async def ws_create_start(hass, connection, msg):
@@ -287,7 +343,7 @@ async def ws_create_start(hass, connection, msg):
     log_cb = _make_log_cb(hass, session_id)
     try:
         result = await llm_service.run_create(
-            hass, entry, msg["requirement"], log_cb, use_docs=msg.get("use_docs", True)
+            hass, entry, msg["requirement"], log_cb, use_docs=msg.get("use_docs")
         )
         # automations 中 set 无法 JSON 序列化，转为 list
         result["valid_ids"] = list(result.get("valid_ids") or [])
@@ -474,11 +530,30 @@ async def ws_consolidate_analyze(hass, connection, msg):
     log_cb = _make_log_cb(hass, msg["session_id"])
     try:
         result = await llm_service.run_consolidate_analyze(hass, entry, log_cb)
-        # automations_data 的 config 字段较大，前端不需要；只传摘要
+        # 构建 id -> yaml_str 映射，向前端提供原始 YAML 用于对比
+        id_to_yaml = {d["id"]: d["yaml_str"] for d in result.get("automations_data", [])}
+
+        # 为 merge_groups 附加各原始自动化的 YAML
+        merge_groups_enriched = []
+        for g in result.get("merge_groups", []):
+            enriched = dict(g)
+            enriched["original_yamls"] = [
+                {"id": aid, "yaml": id_to_yaml.get(aid, "")}
+                for aid in (g.get("ids") or [])
+            ]
+            merge_groups_enriched.append(enriched)
+
+        # 为 fix_items 附加原始 YAML
+        fix_items_enriched = []
+        for f in result.get("fix_items", []):
+            enriched = dict(f)
+            enriched["original_yaml"] = id_to_yaml.get(f.get("id", ""), "")
+            fix_items_enriched.append(enriched)
+
         result_safe = {
-            "merge_groups": result["merge_groups"],
-            "fix_items": result["fix_items"],
-            "ok_items": result["ok_items"],
+            "merge_groups": merge_groups_enriched,
+            "fix_items": fix_items_enriched,
+            "ok_items": result.get("ok_items", []),
         }
         connection.send_result(msg["id"], result_safe)
     except Exception as e:
@@ -625,3 +700,111 @@ def ws_subscribe_log(hass, connection, msg):
     )
     connection.subscriptions[msg_id] = unsub
     connection.send_result(msg_id, {"subscribed": True, "session_id": session_id})
+
+
+# ==================================================================
+# WebSocket 命令：区域 / 标签 / 集成 / 备份清空 / 文档预览
+# ==================================================================
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/get_areas",
+})
+@websocket_api.async_response
+async def ws_get_areas(hass, connection, msg):
+    """返回区域注册表列表"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    from .core.ha_bridge import HABridge
+    bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
+    try:
+        areas = await bridge.get_area_registry()
+        connection.send_result(msg["id"], {"areas": areas})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/get_labels",
+})
+@websocket_api.async_response
+async def ws_get_labels(hass, connection, msg):
+    """返回标签注册表列表"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    from .core.ha_bridge import HABridge
+    bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
+    try:
+        labels = await bridge.get_labels()
+        connection.send_result(msg["id"], {"labels": labels})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/get_integrations",
+})
+@websocket_api.async_response
+async def ws_get_integrations(hass, connection, msg):
+    """返回所有集成平台名称列表"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    from .core.ha_bridge import HABridge
+    bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
+    try:
+        integrations = await bridge.get_entity_platforms()
+        connection.send_result(msg["id"], {"integrations": integrations})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/clear_backups",
+    vol.Required("session_id"): str,
+})
+@websocket_api.async_response
+async def ws_clear_backups(hass, connection, msg):
+    """删除全部备份文件"""
+    from .core import llm_service
+    try:
+        mgr = llm_service._get_backup_manager(hass)
+        backup_dir = mgr.backup_dir if hasattr(mgr, "backup_dir") else None
+        if backup_dir:
+            import glob as globmod
+            files = globmod.glob(str(backup_dir) + "/*.yaml") + globmod.glob(str(backup_dir) + "/*.json")
+            for f in files:
+                os.remove(f)
+            connection.send_result(msg["id"], {"deleted": len(files)})
+        else:
+            connection.send_result(msg["id"], {"deleted": 0})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/preview_doc",
+    vol.Required("doc_key"): str,
+})
+@websocket_api.async_response
+async def ws_preview_doc(hass, connection, msg):
+    """返回文档缓存原文内容（最多 5000 字符）"""
+    from .core import llm_service
+    from .knowledge.fetcher import HA_DOC_URLS
+    try:
+        doc_key = msg["doc_key"]
+        url = HA_DOC_URLS.get(doc_key, "")
+        if not url:
+            connection.send_error(msg["id"], "not_found", f"未知的文档 key: {doc_key}")
+            return
+        fetcher = llm_service._get_doc_fetcher(hass)
+        content = await hass.async_add_executor_job(
+            lambda: fetcher.get_doc(url) or ""
+        )
+        connection.send_result(msg["id"], {"content": content[:5000], "truncated": len(content) > 5000})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))

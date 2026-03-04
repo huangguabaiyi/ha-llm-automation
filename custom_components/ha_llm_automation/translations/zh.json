@@ -2,40 +2,15 @@
   "config": {
     "step": {
       "user": {
-        "title": "配置 LLM 接口",
-        "description": "配置用于生成 Home Assistant 自动化的大语言模型接口。支持 OpenAI、Anthropic 以及任何兼容 OpenAI 格式的接口。",
-        "data": {
-          "provider": "LLM Provider",
-          "api_key": "API Key",
-          "base_url": "Base URL（仅 openai_compatible 需填，如 https://api.openai.com/v1）",
-          "model": "模型名称（如 gpt-4o、claude-sonnet-4-6）",
-          "max_tokens": "最大 Token 数",
-          "temperature": "温度（0.0-1.0，越低输出越稳定）"
-        }
+        "title": "安装 HA LLM Automation",
+        "description": "LLM 接口配置将在侧边栏面板的「配置」标签页完成，无需在此填写。点击「提交」完成安装，然后前往侧边栏配置 API Key。"
       }
     },
     "error": {
-      "cannot_connect": "无法连接到 LLM 接口，请检查 API Key 和 URL",
-      "invalid_auth": "API Key 无效或已过期",
       "unknown": "发生未知错误"
     },
     "abort": {
-      "already_configured": "HA LLM Automation 已经配置，请通过[选项]修改配置"
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "调整配置",
-        "description": "修改 LLM 接口或实体过滤配置",
-        "data": {
-          "model": "模型名称",
-          "max_tokens": "最大 Token 数",
-          "temperature": "温度（0.0-1.0）",
-          "extra_visible_domains": "额外可见域（逗号分隔，如 notify,remote）",
-          "hidden_domains": "隐藏域（逗号分隔，如 weather,person）"
-        }
-      }
+      "already_configured": "HA LLM Automation 已经安装，请前往侧边栏面板进行配置"
     }
   }
 }

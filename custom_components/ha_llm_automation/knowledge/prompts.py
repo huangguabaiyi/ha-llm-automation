@@ -388,8 +388,9 @@ def build_consolidate_prompt(
 {{"merge_groups": [{{"ids": ["id1", "id2"], "aliases": ["alias1", "alias2"], "scenario": "使用场景名称（如：离家节能）", "reason": "中文说明为什么属于同一场景、应该合并", "merged_yaml": "合并后完整YAML（用\\n换行，不要加代码块标记）"}}], "fix_items": [{{"id": "id3", "alias": "alias3", "issue": "中文说明存在什么问题", "fixed_yaml": "修复后完整YAML（用\\n换行，不要加代码块标记）"}}], "ok_items": [{{"id": "id4", "alias": "alias4"}}]}}
 
 requirements:
-- 返回纯 JSON，不要 markdown 代码块
-- merged_yaml 和 fixed_yaml 是完整合法的自动化 YAML 字符串，换行用 \\n 转义
+- 【最高优先级】输出必须是完整可被 json.loads() 直接解析的 JSON，绝对不能截断，宁可精简 reason/scenario 文字也必须保证 JSON 完整
+- 返回纯 JSON，不要 markdown 代码块，JSON 之外不加任何文字
+- merged_yaml 和 fixed_yaml 使用单行紧凑格式：每个字段一行，用 \\n 换行转义，不要多余空行和过度缩进
 - alias 必须是英文 snake_case，description 必须是纯 ASCII 英文句子
 - merged_yaml 必须包含所有被合并自动化中的全部设备操作，不得遗漏
 - 如无需合并/修复，对应列表返回空数组 []\

@@ -13,6 +13,11 @@ CONF_LLM_MAX_TOKENS = "max_tokens"
 CONF_LLM_TEMPERATURE = "temperature"
 CONF_EXTRA_VISIBLE_DOMAINS = "extra_visible_domains"
 CONF_HIDDEN_DOMAINS = "hidden_domains"
+CONF_LOG_PROMPT = "log_prompt"
+CONF_USE_DOCS = "use_docs"
+CONF_AREA_FILTER = "area_filter"
+CONF_LABEL_FILTER = "label_filter"
+CONF_INTEGRATION_FILTER = "integration_filter"
 
 # Defaults
 DEFAULT_MAX_TOKENS = 8192
