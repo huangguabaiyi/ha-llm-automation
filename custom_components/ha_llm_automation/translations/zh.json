@@ -20,7 +20,7 @@
       "unknown": "发生未知错误"
     },
     "abort": {
-      "already_configured": "HA LLM Automation 已经配置，请通过"选项"修改配置"
+      "already_configured": "HA LLM Automation 已经配置，请通过[选项]修改配置"
     }
   },
   "options": {
