@@ -433,6 +433,7 @@ async def run_optimize_analyze(
     config_entry: ConfigEntry,
     automation_id: str,
     log_callback: LogCallback,
+    user_direction: str = "",
 ) -> dict:
     """
     优化模式 Step 1：获取配置 + 分析意图。
@@ -458,7 +459,11 @@ async def run_optimize_analyze(
         entities = []
 
     log_callback("Step 1/2 — LLM 分析意图...")
-    analysis_prompt = build_optimize_analysis_prompt(automation_yaml, entities, visible_domains=visible_domains)
+    analysis_prompt = build_optimize_analysis_prompt(
+        automation_yaml, entities,
+        visible_domains=visible_domains,
+        user_direction=user_direction,
+    )
     _maybe_log_prompt(config_entry, log_callback, analysis_prompt)
     try:
         resp = await llm(
@@ -926,8 +931,13 @@ async def run_restore_backup(
     automations = mgr.restore_backup(backup_path)
     log_callback(f"备份包含 {len(automations)} 条自动化，开始恢复...")
 
-    success, failed = 0, 0
+    success, failed, skipped = 0, 0, 0
     for a in automations:
+        # 跳过配置为空的条目（YAML 型自动化备份时只含状态信息，无 triggers/actions）
+        if not any(k in a for k in ("triggers", "trigger", "actions", "action")):
+            skipped += 1
+            log_callback(f"  跳过（{a.get('alias', '?')}）：配置为空，可能是 YAML 型自动化")
+            continue
         try:
             cfg = normalize_automation(a)
             await bridge.create_automation(cfg)
@@ -937,7 +947,7 @@ async def run_restore_backup(
             log_callback(f"  恢复失败（{a.get('alias', '?')}）：{e}")
 
     await bridge.reload_automations()
-    log_callback(f"恢复完成：{success} 成功，{failed} 失败")
+    log_callback(f"恢复完成：{success} 成功，{failed} 失败，{skipped} 跳过（空配置）")
     return failed == 0
 
 

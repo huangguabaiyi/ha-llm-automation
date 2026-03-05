@@ -411,6 +411,7 @@ async def ws_create_save(hass, connection, msg):
     vol.Required("type"): f"{DOMAIN}/optimize_analyze",
     vol.Required("automation_id"): str,
     vol.Required("session_id"): str,
+    vol.Optional("user_direction"): str,
 })
 @websocket_api.async_response
 async def ws_optimize_analyze(hass, connection, msg):
@@ -423,7 +424,8 @@ async def ws_optimize_analyze(hass, connection, msg):
     log_cb = _make_log_cb(hass, msg["session_id"])
     try:
         result = await llm_service.run_optimize_analyze(
-            hass, entry, msg["automation_id"], log_cb
+            hass, entry, msg["automation_id"], log_cb,
+            user_direction=msg.get("user_direction", ""),
         )
         connection.send_result(msg["id"], result)
     except Exception as e:

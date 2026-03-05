@@ -639,7 +639,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._logUnsub = await this._hass.connection.subscribeMessage(
       (data) => {
         this._pushLog(data.message);
-        this._render();
+        this._updateLogPanel();
         this._scrollLog();
       },
       { type: `${DOMAIN}/subscribe_log`, session_id: sessionId }
@@ -661,13 +661,23 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _log(msg) {
     this._pushLog(msg);
-    this._render();
+    this._updateLogPanel();
     this._scrollLog();
   }
 
   _scrollLog() {
     const logEl = this.shadowRoot.querySelector(".log-entries");
     if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // 精准更新日志面板（不重建整个 DOM，避免干扰其他 Tab 的下拉/输入状态）
+  _updateLogPanel() {
+    const logEntries = this.shadowRoot.querySelector(".log-entries");
+    if (logEntries) {
+      logEntries.innerHTML = this._logs.map(
+        l => `<div class="${l.cls}">${escHtml(l.text)}</div>`
+      ).join("");
+    }
   }
 
   _toast(msg, type = "") {
@@ -847,6 +857,10 @@ class HaLlmAutomationPanel extends HTMLElement {
     const id = this._optimizeSelectedId;
     if (!id) return;
 
+    // 在 startSession 前读取追问方向（_startSession 会触发 _render 重置 DOM）
+    const dirEl = this.shadowRoot.querySelector("#opt-direction-input");
+    const userDirection = dirEl ? dirEl.value.trim() : "";
+
     const sessionId = await this._startSession();
     this._loading = true;
     this._optimizeAnalysis = null;
@@ -854,7 +868,11 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._render();
 
     try {
-      const r = await this._ws("optimize_analyze", { automation_id: id, session_id: sessionId });
+      const r = await this._ws("optimize_analyze", {
+        automation_id: id,
+        session_id: sessionId,
+        ...(userDirection ? { user_direction: userDirection } : {}),
+      });
       this._optimizeAnalysis = r.analysis;
       this._optimizeAutoYaml = r.automation_yaml;
       this._optimizeOriginalYaml = r.automation_yaml;
@@ -1389,13 +1407,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
       ${analysis ? `
         <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <div class="card-title" style="margin:0">Step 1 — 分析报告</div>
-            <button class="btn btn-secondary btn-sm" id="btn-opt-reanalyze"
-              ${this._loading ? 'disabled' : ''} title="重新执行分析">
-              🔄 重新分析
-            </button>
-          </div>
+          <div class="card-title" style="margin-bottom:10px">Step 1 — 分析报告</div>
           <div class="analysis-box">
             <div class="analysis-intent">🎯 ${escHtml(analysis.intent || "")}</div>
             ${analysis.issues?.length ? `
@@ -1408,13 +1420,16 @@ class HaLlmAutomationPanel extends HTMLElement {
             ` : ""}
           </div>
           <div style="margin: 10px 0 6px">
-            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">追加优化方向（可选，传给 Step 2）</label>
+            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">追问 / 追加方向（可选）</label>
             <textarea id="opt-direction-input" rows="2"
-              placeholder="可补充额外优化方向，如：增加夜间时段限制、补全其他区域灯..."></textarea>
+              placeholder="可补充分析追问或优化方向，如：重点分析能否加夜间条件、补全其他区域设备..."></textarea>
           </div>
-          <button class="btn btn-primary" id="btn-opt-generate" ${this._loading ? 'disabled' : ''}>
-            ${this._loading && !genResult ? '<span class="spinner"></span> 生成中...' : '生成优化方案 ▶'}
-          </button>
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn btn-secondary" id="btn-opt-reanalyze" ${this._loading ? 'disabled' : ''}>🔄 重新分析</button>
+            <button class="btn btn-primary" id="btn-opt-generate" ${this._loading ? 'disabled' : ''}>
+              ${this._loading && !genResult ? '<span class="spinner"></span> 生成中...' : '生成优化方案 ▶'}
+            </button>
+          </div>
         </div>
       ` : ""}
 
@@ -1469,7 +1484,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _renderConsolidate() {
     const plan = this._consolidatePlan;
-    const consolidateAutomations = (this._automations || []).filter(a => a.id && a.id !== "new");
+    const consolidateAutomations = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible !== false);
     const selectedSet = this._consolidateSelectedIds || new Set();
     const accessibleAutomations = consolidateAutomations.filter(a => a.accessible);
     const selectedAccessibleCount = accessibleAutomations.filter(a => selectedSet.has(a.id)).length;
@@ -1882,6 +1897,21 @@ class HaLlmAutomationPanel extends HTMLElement {
     const savedContentScroll = prevContent ? prevContent.scrollTop : 0;
     const savedMainScroll = prevMain ? prevMain.scrollTop : 0;
 
+    // 保存 Toast 节点（innerHTML 重写会清空容器，toast 会消失）
+    const prevToastContainer = this.shadowRoot.querySelector(".toast-container");
+    const toastNodes = prevToastContainer ? [...prevToastContainer.childNodes] : [];
+
+    // 保存配置表单的当前输入值（避免 re-render 重置用户正在编辑的内容）
+    const cfgFieldIds = ["cfg-provider", "cfg-api-key", "cfg-base-url", "cfg-model",
+                         "cfg-max-tokens", "cfg-temperature", "cfg-extra-domains-input", "cfg-hidden-domains"];
+    const savedCfgValues = {};
+    if (this._tab === "config") {
+      for (const fid of cfgFieldIds) {
+        const el = this.shadowRoot.getElementById(fid);
+        if (el) savedCfgValues[fid] = el.value;
+      }
+    }
+
     this.shadowRoot.innerHTML = `
       <style>${STYLES}</style>
       <div class="header">
@@ -1905,6 +1935,18 @@ class HaLlmAutomationPanel extends HTMLElement {
     if (newContent && savedContentScroll) newContent.scrollTop = savedContentScroll;
     const newMain = this.shadowRoot.querySelector(".main-area");
     if (newMain && savedMainScroll) newMain.scrollTop = savedMainScroll;
+
+    // 恢复 Toast 节点（移动到新容器，保持 setTimeout 引用有效）
+    if (toastNodes.length) {
+      const newToastContainer = this.shadowRoot.querySelector(".toast-container");
+      if (newToastContainer) toastNodes.forEach(n => newToastContainer.appendChild(n));
+    }
+
+    // 恢复配置表单值（防止用户正在编辑时被 re-render 重置）
+    for (const [fid, val] of Object.entries(savedCfgValues)) {
+      const el = this.shadowRoot.getElementById(fid);
+      if (el) el.value = val;
+    }
 
     this._bindEvents();
   }

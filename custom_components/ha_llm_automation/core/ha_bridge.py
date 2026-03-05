@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
+
+_LOGGER = logging.getLogger(__name__)
 
 import yaml
 from homeassistant.core import HomeAssistant
@@ -137,6 +140,12 @@ class HABridge:
                     entity_labels[e.entity_id] = set(e.labels) if e.labels else set()
         except Exception:
             pass
+
+        # 若 integration_filter 生效但 entity_platform 为空（注册表读取失败），
+        # 则禁用集成过滤，避免因平台信息缺失导致所有实体被错误过滤掉
+        if integration_filter and not entity_platform:
+            _LOGGER.warning("ha_bridge: entity_platform 为空，integration_filter 已禁用")
+            integration_filter = None
 
         for ent in entities_raw:
             eid = ent.get("entity_id", "")

@@ -223,12 +223,14 @@ def build_optimize_analysis_prompt(
     automation_yaml: str,
     entities: list[dict],
     visible_domains: set[str] | None = None,
+    user_direction: str = "",
 ) -> str:
     """
     构建单条自动化优化 Step 1 分析提示词。
     LLM 需理解意图、找出问题并给出优化建议，严格返回 JSON。
     """
     entity_section = _build_entity_section(entities, visible_domains=visible_domains)
+    direction_note = f"\n\n## 用户追加的分析方向\n{user_direction}" if user_direction.strip() else ""
     return f"""\
 你是一名 Home Assistant 自动化专家，负责分析已有自动化的意图并找出优化点。
 
@@ -238,7 +240,7 @@ def build_optimize_analysis_prompt(
 {automation_yaml}
 ```
 
-{entity_section}
+{entity_section}{direction_note}
 
 ## 分析任务
 1. 理解这条自动化的功能意图（它想做什么，为了什么目的）
