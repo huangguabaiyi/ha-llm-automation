@@ -727,6 +727,30 @@ class HaLlmAutomationPanel extends HTMLElement {
     }
   }
 
+  async _deleteInaccessible() {
+    const inaccessible = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible === false);
+    if (inaccessible.length === 0) return;
+    if (!confirm(`确定要删除全部 ${inaccessible.length} 条不可访问的 YAML 型自动化吗？此操作不可撤销。`)) return;
+    this._loading = true;
+    this._render();
+    try {
+      const r = await this._ws("delete_inaccessible_automations");
+      const deleted = r.deleted || [];
+      const failed = r.failed || [];
+      if (failed.length > 0) {
+        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败`, "error");
+      } else {
+        this._toast(`已删除 ${deleted.length} 条不可访问的自动化`, "success");
+      }
+      await this._loadAutomations();
+    } catch (e) {
+      this._toast(`删除失败：${e.message || e}`, "error");
+    } finally {
+      this._loading = false;
+      this._render();
+    }
+  }
+
   async _loadBackups() {
     try {
       const r = await this._ws("list_backups");
@@ -1517,6 +1541,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     const selectedSet = this._consolidateSelectedIds || new Set();
     const accessibleAutomations = consolidateAutomations.filter(a => a.accessible);
     const selectedAccessibleCount = accessibleAutomations.filter(a => selectedSet.has(a.id)).length;
+    const inaccessibleCount = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible === false).length;
 
     return `
       <div class="card">
@@ -1556,6 +1581,12 @@ class HaLlmAutomationPanel extends HTMLElement {
             <div class="checklist-actions">
               <button class="btn btn-secondary btn-sm" id="btn-cons-select-all">☑ 全选</button>
               <button class="btn btn-secondary btn-sm" id="btn-cons-deselect-all">☐ 全不选</button>
+              ${inaccessibleCount > 0 ? `
+              <button class="btn btn-secondary btn-sm" id="btn-cons-del-inaccessible"
+                style="color:#f87171;border-color:#f87171"
+                ${this._loading ? 'disabled' : ''}>
+                🗑 清除不可访问（${inaccessibleCount} 条）
+              </button>` : ''}
               <button class="btn btn-primary" id="btn-cons-start-analyze"
                 ${this._loading || selectedAccessibleCount === 0 ? 'disabled' : ''}>
                 ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '▶ 开始分析（' + selectedAccessibleCount + ' 条）'}
@@ -2123,6 +2154,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     // ==== Consolidate tab ====
     const btnConsReload = $("btn-cons-reload");
     if (btnConsReload) btnConsReload.addEventListener("click", () => this._loadAutomations());
+
+    const btnDelInaccessible = $("btn-cons-del-inaccessible");
+    if (btnDelInaccessible) btnDelInaccessible.addEventListener("click", () => this._deleteInaccessible());
 
     const btnConsSelAll = $("btn-cons-select-all");
     if (btnConsSelAll) btnConsSelAll.addEventListener("click", () => this._selectAllConsolidate(true));

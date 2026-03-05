@@ -165,6 +165,7 @@ def _register_websocket_commands(hass: HomeAssistant) -> None:
         ws_get_integrations,
         ws_clear_backups,
         ws_preview_doc,
+        ws_delete_inaccessible_automations,
     ]
     for cmd in cmds:
         websocket_api.async_register_command(hass, cmd)
@@ -295,6 +296,44 @@ async def ws_get_automations(hass, connection, msg):
             except Exception:
                 accessible.append({**a, "accessible": False})
         connection.send_result(msg["id"], {"automations": accessible})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/delete_inaccessible_automations",
+})
+@websocket_api.async_response
+async def ws_delete_inaccessible_automations(hass, connection, msg):
+    """删除所有无法通过 API 获取配置的 YAML 型自动化"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    from .core.ha_bridge import HABridge
+    bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
+    try:
+        automations = await bridge.list_automations()
+        deleted = []
+        failed = []
+        for a in automations:
+            aid = a.get("id", "")
+            if not aid or aid == "new":
+                continue
+            # 尝试获取配置，成功则跳过（存储型），失败则删除（YAML 型）
+            try:
+                await bridge.get_automation_config(aid)
+                continue
+            except Exception:
+                pass
+            try:
+                await bridge.delete_automation(aid)
+                deleted.append({"id": aid, "alias": a.get("alias", aid)})
+            except Exception as e:
+                failed.append({"id": aid, "alias": a.get("alias", aid), "error": str(e)})
+        if deleted:
+            await bridge.reload_automations()
+        connection.send_result(msg["id"], {"deleted": deleted, "failed": failed})
     except Exception as e:
         connection.send_error(msg["id"], "error", str(e))
 
