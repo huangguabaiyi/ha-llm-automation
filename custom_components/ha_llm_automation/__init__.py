@@ -14,6 +14,7 @@ from pathlib import Path
 
 import voluptuous as vol
 from homeassistant.components import frontend, websocket_api
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -85,11 +86,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 注册静态前端文件
     if FRONTEND_DIR.exists():
-        hass.http.register_static_path(
-            f"/{DOMAIN}/frontend",
-            str(FRONTEND_DIR),
-            cache_headers=False,
-        )
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(f"/{DOMAIN}/frontend", str(FRONTEND_DIR), cache_headers=False)
+        ])
 
     # 注册侧边栏面板
     frontend.async_register_built_in_panel(
