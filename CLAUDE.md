@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题跟随 + 聚合全量覆盖 + 优化追问方向 + 批量勾选 + HA2026兼容 + 滚动修复 + 6项 UX/可靠性修复）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题跟随 + 聚合全量覆盖 + 优化追问方向 + 批量勾选 + HA2026兼容 + 滚动修复 + 6项 UX/可靠性修复 + 列表加载状态 UX）。
 
 ---
 
@@ -516,6 +516,7 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **集成筛选容错**：`ha_bridge.get_entities()` 检测到 `entity_platform` 为空时禁用 `integration_filter`（避免全量误过滤），新增 `import logging` / `_LOGGER`
 - **优化下拉不再收起**：新增 `_updateLogPanel()` 精准更新 `.log-entries`，日志订阅回调和 `_log()` 均改用它替代 `_render()`，防止日志推送触发 DOM 重建
 - **配置保存 Toast + 表单值持久**：`_render()` 前保存 `.toast-container` 子节点 + 8 个配置输入字段值，重写 innerHTML 后恢复，Toast 不再消失、表单不再被 re-render 重置
+- **自动化列表加载状态 UX**：`_automations` 从 `[]` 改为 `null` 区分「未加载」与「已加载为空」；新增 `_automationsLoading` 标志；优化/聚合 Tab 选择卡片顶部各加「🔄 刷新列表」按钮，显示三态：加载中（spinner）/ 加载失败（null，提示重试）/ 无数据（已加载但空）
 
 ### macOS 退格键 / 方向键异常
 
