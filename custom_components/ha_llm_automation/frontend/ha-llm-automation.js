@@ -131,8 +131,11 @@ const STYLES = `
   }
   textarea, input[type=text], input[type=password], input[type=number], select {
     width: 100%;
-    background: transparent;
-    border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+    background: linear-gradient(135deg,
+      rgba(129, 140, 248, 0.07) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(129, 140, 248, 0.05) 100%);
+    border: 1px solid var(--divider-color, rgba(255,255,255,0.12));
     border-radius: 8px;
     padding: 9px 12px;
     color: var(--primary-text-color, #e5e7eb);
@@ -141,13 +144,130 @@ const STYLES = `
     resize: vertical;
     box-sizing: border-box;
     outline: none;
-    transition: border-color 0.15s;
+    backdrop-filter: blur(6px);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
   }
   textarea:focus, input:focus, select:focus {
-    border-color: #818cf8;
-    box-shadow: 0 0 0 2px rgba(129,140,248,0.15);
+    border-color: rgba(129, 140, 248, 0.55);
+    box-shadow: 0 0 0 2px rgba(129,140,248,0.12), 0 4px 16px rgba(129,140,248,0.12);
+    background: linear-gradient(135deg,
+      rgba(129, 140, 248, 0.12) 0%,
+      rgba(255, 255, 255, 0.04) 50%,
+      rgba(129, 140, 248, 0.10) 100%);
   }
   textarea { min-height: 80px; }
+  :host([data-theme="light"]) textarea,
+  :host([data-theme="light"]) input[type=text],
+  :host([data-theme="light"]) input[type=password],
+  :host([data-theme="light"]) input[type=number],
+  :host([data-theme="light"]) select {
+    background: rgba(255, 255, 255, 0.75);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05), inset 0 1px 2px rgba(255,255,255,0.9);
+  }
+  :host([data-theme="light"]) textarea:focus,
+  :host([data-theme="light"]) input:focus,
+  :host([data-theme="light"]) select:focus {
+    border-color: rgba(99, 102, 241, 0.5);
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.12), 0 4px 16px rgba(99,102,241,0.10);
+    background: rgba(255, 255, 255, 0.92);
+  }
+  /* ===== 液态荡漾主输入框 ===== */
+  .input-wrap {
+    position: relative;
+    border-radius: 12px;
+  }
+  .input-wrap::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 13px;
+    background: linear-gradient(90deg, #d65f00, #ffb800, #8a2be2, #818cf8, #ffb800, #d45e00);
+    background-size: 300% 300%;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    padding: 1.5px;
+    animation: inputGradientFlow 4s linear infinite;
+    opacity: 0.2;
+    transition: opacity 0.4s ease-in-out;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .input-wrap::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0;
+    background: linear-gradient(to top, rgba(129, 140, 248, 0.35), transparent 80%);
+    border-radius: 12px;
+    opacity: 0;
+    z-index: 1;
+    transform-origin: bottom;
+    pointer-events: none;
+    will-change: height, opacity, transform;
+  }
+  .input-wrap:focus-within::before { opacity: 1; }
+  .input-wrap:focus-within { animation: inputBlinking 8s linear infinite; }
+  .input-wrap:focus-within::after {
+    animation: inputLiquidRipple 1.5s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  }
+  .input-wrap textarea {
+    border-radius: 12px;
+    border: none;
+    position: relative;
+    z-index: 2;
+    background: linear-gradient(135deg,
+      rgba(129, 140, 248, 0.10) 0%,
+      rgba(255, 255, 255, 0.03) 50%,
+      rgba(129, 140, 248, 0.08) 100%);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15), inset 0 2px 4px rgba(255,255,255,0.08);
+    transition: box-shadow 0.3s ease, background 0.3s ease;
+  }
+  .input-wrap textarea:focus {
+    box-shadow: 0 8px 28px rgba(129,140,248,0.2),
+      inset 0 4px 8px rgba(255,255,255,0.12),
+      inset 0 -4px 8px rgba(0,0,0,0.1);
+    background: linear-gradient(135deg,
+      rgba(129, 140, 248, 0.15) 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(129, 140, 248, 0.12) 100%);
+  }
+  :host([data-theme="light"]) .input-wrap::before {
+    background: linear-gradient(90deg, #d65f00, #ffb800, #6366f1, #818cf8, #ffb800, #d45e00);
+    background-size: 300% 300%;
+  }
+  :host([data-theme="light"]) .input-wrap::after {
+    background: linear-gradient(to top, rgba(99, 102, 241, 0.28), transparent 80%);
+  }
+  :host([data-theme="light"]) .input-wrap textarea {
+    background: linear-gradient(135deg,
+      rgba(99, 102, 241, 0.07) 0%, rgba(255,255,255,0.93) 50%, rgba(99, 102, 241, 0.05) 100%);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08), inset 0 2px 4px rgba(255,255,255,0.95);
+  }
+  :host([data-theme="light"]) .input-wrap textarea:focus {
+    box-shadow: 0 8px 28px rgba(99,102,241,0.15), inset 0 4px 8px rgba(255,255,255,0.98);
+  }
+  @keyframes inputGradientFlow {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  @keyframes inputBlinking {
+    0%   { filter: drop-shadow(0px 0px 3px rgba(129,140,248,0.6)); }
+    25%  { filter: drop-shadow(0px 0px 6px rgba(129,140,248,0.7)); }
+    50%  { filter: drop-shadow(0px 0px 10px rgba(255,165,0,0.6)); }
+    75%  { filter: drop-shadow(0px 0px 6px rgba(129,140,248,0.7)); }
+    100% { filter: drop-shadow(0px 0px 3px rgba(129,140,248,0.6)); }
+  }
+  @keyframes inputLiquidRipple {
+    0%   { height: 10%; opacity: 0; transform: scaleY(0.5); }
+    30%  { height: 50%; opacity: 0.9; transform: scaleY(1); }
+    70%  { height: 75%; opacity: 0.4; }
+    100% { height: 100%; opacity: 0; transform: scaleY(1.1); }
+  }
   .btn {
     display: inline-flex;
     align-items: center;
@@ -260,6 +380,8 @@ const STYLES = `
   .refine-area.visible { display: block; }
   .refine-input { display: flex; gap: 8px; align-items: flex-start; }
   .refine-input textarea { min-height: 56px; flex: 1; }
+  .refine-input .input-wrap { flex: 1; }
+  .refine-input .input-wrap textarea { min-height: 56px; flex: none; width: 100%; }
   .log-panel {
     background: var(--card-background-color, #1a1f2e);
     border-radius: 12px;
@@ -1354,7 +1476,9 @@ class HaLlmAutomationPanel extends HTMLElement {
       <div class="card">
         <div class="card-title">描述自动化需求</div>
         <div class="form-row">
-          <textarea id="create-req" placeholder="例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇" rows="4"></textarea>
+          <div class="input-wrap">
+            <textarea id="create-req" placeholder="例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇" rows="4"></textarea>
+          </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary" id="btn-create-start" ${this._loading ? 'disabled' : ''}>
@@ -1474,8 +1598,10 @@ class HaLlmAutomationPanel extends HTMLElement {
           </div>
           <div style="margin: 10px 0 6px">
             <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">追问 / 追加方向（可选）</label>
-            <textarea id="opt-direction-input" rows="2"
-              placeholder="可补充分析追问或优化方向，如：重点分析能否加夜间条件、补全其他区域设备..."></textarea>
+            <div class="input-wrap">
+              <textarea id="opt-direction-input" rows="2"
+                placeholder="可补充分析追问或优化方向，如：重点分析能否加夜间条件、补全其他区域设备..."></textarea>
+            </div>
           </div>
           <div class="btn-row" style="margin-top:8px">
             <button class="btn btn-secondary" id="btn-opt-reanalyze" ${this._loading ? 'disabled' : ''}>🔄 重新分析</button>
@@ -1518,7 +1644,9 @@ class HaLlmAutomationPanel extends HTMLElement {
             <div class="yaml-block">${renderDiff(this._optimizeOriginalYaml, genResult.yaml_str)}</div>
           `}
           <div class="refine-input" style="margin-top:12px">
-            <textarea id="opt-refine-input" placeholder="输入追问修改意见..." rows="2"></textarea>
+            <div class="input-wrap">
+              <textarea id="opt-refine-input" placeholder="输入追问修改意见..." rows="2"></textarea>
+            </div>
             <button class="btn btn-secondary btn-sm" id="btn-opt-refine">重新生成</button>
           </div>
           <div class="btn-row">
