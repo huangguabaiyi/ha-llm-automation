@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题实时跟随 + 标题颜色修复 + 聚合 prompt 全量覆盖 + 优化追问方向 + 批量勾选执行 + HA 2026.x 静态路径 API 兼容 + 滚动跳顶修复）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题跟随 + 聚合全量覆盖 + 优化追问方向 + 批量勾选 + HA2026兼容 + 滚动修复 + 6项 UX/可靠性修复）。
 
 ---
 
@@ -510,6 +510,12 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **优化 step1 重新分析按钮**：分析报告卡片标题右侧新增"🔄 重新分析"按钮，可随时重新执行 step1；direction 标签改为"追加优化方向（传给 Step 2）"
 - **HA 2026.x 静态路径 API 兼容**：`hass.http.register_static_path()` 在 2026.x 被移除，改用 `await hass.http.async_register_static_paths([StaticPathConfig(...)])` + 新增 `from homeassistant.components.http import StaticPathConfig`（兼容 2024.2+）
 - **滚动跳顶修复（Critical UX）**：① `hass` setter 仅在首次注入时调用 `_render()`，避免 HA 每次推送实体状态更新都触发全量重绘；② `_render()` 在重写 innerHTML 前保存 `.content/.main-area` 的 `scrollTop`，重写后立即恢复
+- **备份恢复跳过空配置**：`run_restore_backup` 检测无 triggers/actions 的条目（YAML 型自动化空配置），直接 skip + 记录日志，避免误报"缺少必要字段"
+- **聚合列表过滤不可访问**：`_renderConsolidate` 加 `a.accessible !== false` 过滤，不再展示 YAML 型不可访问自动化
+- **优化 Step1 追问重新分析**：去掉标题处的独立"重新分析"按钮，textarea 下方改为双按钮行（🔄重新分析 + ▶生成优化方案）；`_optimizeAnalyze()` 读取方向输入传 `user_direction`；后端 `build_optimize_analysis_prompt`/`run_optimize_analyze`/`ws_optimize_analyze` 同步支持
+- **集成筛选容错**：`ha_bridge.get_entities()` 检测到 `entity_platform` 为空时禁用 `integration_filter`（避免全量误过滤），新增 `import logging` / `_LOGGER`
+- **优化下拉不再收起**：新增 `_updateLogPanel()` 精准更新 `.log-entries`，日志订阅回调和 `_log()` 均改用它替代 `_render()`，防止日志推送触发 DOM 重建
+- **配置保存 Toast + 表单值持久**：`_render()` 前保存 `.toast-container` 子节点 + 8 个配置输入字段值，重写 innerHTML 后恢复，Toast 不再消失、表单不再被 re-render 重置
 
 ### macOS 退格键 / 方向键异常
 
