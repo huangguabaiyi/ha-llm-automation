@@ -489,6 +489,7 @@ const STYLES = `
   .check-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
   .check-item:hover { background: rgba(255,255,255,0.05); }
   .check-item-disabled { opacity: 0.4; cursor: not-allowed; }
+  .consolidate-check-item { accent-color: #818cf8; width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
   .check-label { flex: 1; font-size: 13px; }
   .check-warning { font-size: 11px; color: #f87171; }
   .checklist-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1105,7 +1106,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   // ------------------------------------------------------------------
 
   async _saveConfig() {
-    // Collect form values
+    // Collect form values FIRST (before any DOM manipulation)
     const $ = id => this.shadowRoot.getElementById(id);
     const payload = {};
 
@@ -1147,12 +1148,18 @@ class HaLlmAutomationPanel extends HTMLElement {
     payload.label_filter = (this._configData.label_filter || []).slice();
     payload.integration_filter = (this._configData.integration_filter || []).slice();
 
+    // Disable button to prevent double-click
+    const btnSave = $("btn-save-config");
+    if (btnSave) { btnSave.disabled = true; btnSave.textContent = "⏳ 保存中..."; }
+
     try {
       await this._ws("save_config", payload);
       this._configData = { ...this._configData, ...payload };
       this._toast("配置已保存", "success");
     } catch (e) {
       this._toast(`保存失败：${e.message || e}`, "error");
+    } finally {
+      if (btnSave) { btnSave.disabled = false; btnSave.textContent = "💾 保存配置"; }
     }
   }
 
@@ -1382,7 +1389,13 @@ class HaLlmAutomationPanel extends HTMLElement {
 
       ${analysis ? `
         <div class="card">
-          <div class="card-title">Step 1 — 分析报告</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div class="card-title" style="margin:0">Step 1 — 分析报告</div>
+            <button class="btn btn-secondary btn-sm" id="btn-opt-reanalyze"
+              ${this._loading ? 'disabled' : ''} title="重新执行分析">
+              🔄 重新分析
+            </button>
+          </div>
           <div class="analysis-box">
             <div class="analysis-intent">🎯 ${escHtml(analysis.intent || "")}</div>
             ${analysis.issues?.length ? `
@@ -1395,7 +1408,7 @@ class HaLlmAutomationPanel extends HTMLElement {
             ` : ""}
           </div>
           <div style="margin: 10px 0 6px">
-            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">优化方向（可选）</label>
+            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">追加优化方向（可选，传给 Step 2）</label>
             <textarea id="opt-direction-input" rows="2"
               placeholder="可补充额外优化方向，如：增加夜间时段限制、补全其他区域灯..."></textarea>
           </div>
@@ -1988,6 +2001,9 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     const btnOptAna = $("btn-opt-analyze");
     if (btnOptAna) btnOptAna.addEventListener("click", () => this._optimizeAnalyze());
+
+    const btnOptReana = $("btn-opt-reanalyze");
+    if (btnOptReana) btnOptReana.addEventListener("click", () => this._optimizeAnalyze());
 
     const btnOptGen = $("btn-opt-generate");
     if (btnOptGen) btnOptGen.addEventListener("click", () => this._optimizeGenerate());
