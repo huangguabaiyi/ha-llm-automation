@@ -608,8 +608,8 @@ class HaLlmAutomationPanel extends HTMLElement {
   set hass(val) {
     const firstLoad = !this._hass;
     this._hass = val;
-    this._render();
     if (firstLoad) {
+      this._render();
       this._loadAutomations();
     }
   }
@@ -1876,6 +1876,12 @@ class HaLlmAutomationPanel extends HTMLElement {
     else if (this._tab === "config") mainContent = this._renderConfig();
     else if (this._tab === "knowledge") mainContent = this._renderKnowledge();
 
+    // 保存滚动位置，防止 innerHTML 重写后归零
+    const prevContent = this.shadowRoot.querySelector(".content");
+    const prevMain = this.shadowRoot.querySelector(".main-area");
+    const savedContentScroll = prevContent ? prevContent.scrollTop : 0;
+    const savedMainScroll = prevMain ? prevMain.scrollTop : 0;
+
     this.shadowRoot.innerHTML = `
       <style>${STYLES}</style>
       <div class="header">
@@ -1893,6 +1899,12 @@ class HaLlmAutomationPanel extends HTMLElement {
       </div>
       <div class="toast-container"></div>
     `;
+
+    // 恢复滚动位置
+    const newContent = this.shadowRoot.querySelector(".content");
+    if (newContent && savedContentScroll) newContent.scrollTop = savedContentScroll;
+    const newMain = this.shadowRoot.querySelector(".main-area");
+    if (newMain && savedMainScroll) newMain.scrollTop = savedMainScroll;
 
     this._bindEvents();
   }
