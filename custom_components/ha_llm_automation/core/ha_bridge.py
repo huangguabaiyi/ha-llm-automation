@@ -321,7 +321,9 @@ class HABridge:
         session = async_get_clientsession(self._hass, verify_ssl=False)
         url = f"{self._base_url}/api/config/automation/config/{automation_id}"
         async with session.delete(url, headers=self._headers()) as resp:
-            resp.raise_for_status()
+            if not resp.ok:
+                body = (await resp.text())[:600]
+                raise RuntimeError(f"{resp.status} — HA 说：{body}")
         return True
 
     async def reload_automations(self) -> bool:

@@ -401,7 +401,7 @@ async def run_create_save(
 
     log_callback("备份现有自动化...")
     try:
-        existing = await bridge.list_automations()
+        existing = await _get_full_automations_for_backup(bridge)
         backup_path = backup_mgr.create_backup(existing)
         log_callback(f"备份已保存：{backup_path}")
     except Exception as e:
@@ -590,7 +590,7 @@ async def run_optimize_save(
 
     log_callback("备份现有自动化...")
     try:
-        existing = await bridge.list_automations()
+        existing = await _get_full_automations_for_backup(bridge)
         backup_path = backup_mgr.create_backup(existing)
         log_callback(f"备份已保存：{backup_path}")
     except Exception as e:
@@ -771,7 +771,7 @@ async def run_consolidate_execute(
 
     log_callback("备份现有自动化...")
     try:
-        existing = await bridge.list_automations()
+        existing = await _get_full_automations_for_backup(bridge)
         backup_path = backup_mgr.create_backup(existing)
         log_callback(f"备份已保存：{backup_path}")
     except Exception as e:
@@ -954,6 +954,25 @@ async def run_restore_backup(
 # ==================================================================
 # 辅助
 # ==================================================================
+
+async def _get_full_automations_for_backup(bridge) -> list[dict]:
+    """
+    获取所有存储型自动化的完整配置用于备份。
+    逐条调用 get_automation_config，跳过 YAML 型（GET 失败）。
+    """
+    summaries = await bridge.list_automations()
+    full_configs = []
+    for a in summaries:
+        aid = a.get("id", "")
+        if not aid or aid == "new":
+            continue
+        try:
+            cfg = await bridge.get_automation_config(aid)
+            full_configs.append(cfg)
+        except Exception:
+            pass  # YAML 型或不可访问，跳过
+    return full_configs
+
 
 def _get_llm_async_wrapper(hass: HomeAssistant, llm_client):
     """返回一个 async 包装，在 executor 中运行同步 LLM 调用"""
