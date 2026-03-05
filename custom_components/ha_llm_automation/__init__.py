@@ -518,6 +518,7 @@ async def ws_optimize_save(hass, connection, msg):
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/consolidate_analyze",
     vol.Required("session_id"): str,
+    vol.Optional("automation_ids"): list,  # None = 分析全部，传入列表 = 只分析指定 ID
 })
 @websocket_api.async_response
 async def ws_consolidate_analyze(hass, connection, msg):
@@ -529,7 +530,10 @@ async def ws_consolidate_analyze(hass, connection, msg):
     from .core import llm_service
     log_cb = _make_log_cb(hass, msg["session_id"])
     try:
-        result = await llm_service.run_consolidate_analyze(hass, entry, log_cb)
+        result = await llm_service.run_consolidate_analyze(
+            hass, entry, log_cb,
+            automation_ids=msg.get("automation_ids"),
+        )
         # 构建 id -> yaml_str 映射，向前端提供原始 YAML 用于对比
         id_to_yaml = {d["id"]: d["yaml_str"] for d in result.get("automations_data", [])}
 

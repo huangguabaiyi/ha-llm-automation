@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现并通过端到端测试（create / optimize / consolidate）；统一交互入口（`python3 main.py`）已上线；最终封装为 HA Custom Component。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.2**（token 过期修复 + 聚合预选 + 主题切换 + 终止按钮 + diff 切换 + CSS 修复）。
 
 ---
 
@@ -488,20 +488,52 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
 - [ ] `backup restore`：逐条恢复流程完整性验证
 
+### v2.2 已修复
+
+- **HA access_token 30 分钟过期**：`HABridge` 改存 `refresh_token` 对象，`_headers()` 每次调用实时生成新 access_token。`_get_or_create_refresh_token()` 返回 refresh_token 对象（不再调用 `async_create_access_token`）。
+- **亮色模式输入框灰底**：CSS 改为 `background: transparent`
+- **亮色模式 Tab 文字不可见**：Tab 字体改用 `var(--app-header-text-color)` + opacity
+- **聚合模块**：`run_consolidate_analyze` 新增 `automation_ids` 参数，前端聚合 Tab 加预选 checkbox 列表
+- **前端新增**：主题切换（🌓 循环三态）、终止按钮（■）、优化 diff 切换（左右/内联）、配置页筛选备注
+
 ### macOS 退格键 / 方向键异常
 
 **已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。
 
 ---
 
-## 十二、后续封装为 HA 插件规划
+## 十二、HACS Custom Component（已实现，v2.2）
 
-1. 将核心逻辑提取为独立 Python 包
-2. 创建 `custom_components/ha_llm_automation/` 目录
-3. 实现 `config_flow.py`（UI 配置向导）
-4. 实现 `conversation.py` 或 `service.py` 暴露 HA 服务
-5. 注册为 HA 对话代理（Conversation Agent）
-6. 编写 `manifest.json` 和 `strings.json`
+`custom_components/ha_llm_automation/` 已完整实现，结构如下：
+
+```
+custom_components/ha_llm_automation/
+├── __init__.py          ← setup_entry + 24个WS命令 + 面板注册 + 旧配置迁移
+├── config_flow.py       ← 纯确认步骤（无字段，全配置在前端配置Tab完成）
+├── const.py             ← CONF_LOG_PROMPT/USE_DOCS/AREA_FILTER/LABEL_FILTER/INTEGRATION_FILTER
+├── core/
+│   ├── ha_bridge.py     ← HABridge（存refresh_token对象，_headers()实时生成access_token）
+│   ├── llm_service.py   ← 三大模式async化；run_consolidate_analyze支持automation_ids过滤
+│   └── automations_utils.py
+├── knowledge/ / llm_client/ / backup/
+└── frontend/ha-llm-automation.js  ← v2.2 前端
+```
+
+### 关键设计决策
+
+- **Token**：`setup_entry` 时用 `TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN` 创建 refresh_token（不过期），存入 `HABridge`；每次 REST 调用通过 `_headers()` 实时生成 access_token（避免 30 分钟过期）
+- **配置存储**：全部 LLM 配置存 `entry.options`；config_flow 仅一步确认，无字段
+- **实体**：使用 HA 内置 `hass.states` / `entity_registry` / `area_registry`（无 REST）
+- **自动化 CRUD**：aiohttp 对 `localhost:8123`（避免反向代理限制）
+- **日志推送**：dispatcher send → WS subscribe_log → 前端实时显示
+
+### 部署方式
+
+```
+将 custom_components/ha_llm_automation/ 复制到 HA config/custom_components/
+重启 HA → 集成页面添加"HA LLM Automation" → 点击确认
+侧边栏出现 LLM Automation 入口 → 配置Tab → 填写 API Key 等 → 保存
+```
 
 ---
 

@@ -82,17 +82,19 @@ const STYLES = `
     padding: 11px 18px;
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    color: var(--secondary-text-color, #9ca3af);
+    color: var(--app-header-text-color, #e5e7eb);
+    opacity: 0.65;
     font-weight: 500;
     font-size: 13px;
-    transition: color 0.15s;
+    transition: color 0.15s, opacity 0.15s;
     white-space: nowrap;
     position: relative;
   }
-  .tab:hover { color: var(--primary-text-color, #f3f4f6); }
+  .tab:hover { opacity: 0.9; }
   .tab.active {
-    color: #818cf8;
-    border-bottom-color: #818cf8;
+    color: var(--app-header-text-color, #818cf8);
+    border-bottom-color: var(--app-header-text-color, #818cf8);
+    opacity: 1;
   }
   .content {
     flex: 1;
@@ -129,7 +131,7 @@ const STYLES = `
   }
   textarea, input[type=text], input[type=password], input[type=number], select {
     width: 100%;
-    background: var(--secondary-background-color, rgba(0,0,0,0.35));
+    background: transparent;
     border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
     border-radius: 8px;
     padding: 9px 12px;
@@ -320,7 +322,7 @@ const STYLES = `
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
-    background: var(--secondary-background-color, rgba(0,0,0,0.35));
+    background: transparent;
     border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
     border-radius: 8px;
     padding: 6px 10px;
@@ -358,7 +360,7 @@ const STYLES = `
   .dropdown-toggle-btn {
     width: 100%;
     text-align: left;
-    background: var(--secondary-background-color, rgba(0,0,0,0.3));
+    background: transparent;
     border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
     border-radius: 8px;
     padding: 7px 12px;
@@ -468,6 +470,50 @@ const STYLES = `
     padding: 4px 0;
   }
   .checkbox-row input[type=checkbox] { width: auto; }
+  .icon-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 18px;
+    color: var(--app-header-text-color, #e5e7eb);
+    opacity: 0.8;
+    border-radius: 4px;
+  }
+  .icon-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+  .abort-btn { color: #f87171; }
+  .hint-text { font-size: 12px; color: var(--secondary-text-color, #9ca3af); margin: 4px 0 8px; }
+  .consolidate-select-panel { padding: 12px; }
+  .panel-label { font-size: 13px; color: var(--secondary-text-color, #9ca3af); margin-bottom: 8px; }
+  .automation-checklist { max-height: 280px; overflow-y: auto; border: 1px solid var(--divider-color, rgba(255,255,255,0.08)); border-radius: 6px; padding: 4px; margin-bottom: 10px; }
+  .check-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+  .check-item:hover { background: rgba(255,255,255,0.05); }
+  .check-item-disabled { opacity: 0.4; cursor: not-allowed; }
+  .check-label { flex: 1; font-size: 13px; }
+  .check-warning { font-size: 11px; color: #f87171; }
+  .checklist-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn-sm-plain { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--divider-color, rgba(255,255,255,0.15)); background: transparent; color: var(--primary-text-color, #e5e7eb); cursor: pointer; }
+  .btn-sm-plain:hover { background: rgba(255,255,255,0.08); }
+  .btn-sm.active { background: rgba(99,102,241,0.2); border-color: #6366f1; color: #818cf8; }
+  .diff-mode-btns { display: flex; gap: 6px; margin-bottom: 8px; }
+  :host([data-theme="dark"]) {
+    --primary-background-color: #0f1117;
+    --card-background-color: #1e2433;
+    --app-header-background-color: #1a1f2e;
+    --app-header-text-color: #e5e7eb;
+    --primary-text-color: #e5e7eb;
+    --secondary-text-color: #9ca3af;
+    --divider-color: rgba(255,255,255,0.08);
+  }
+  :host([data-theme="light"]) {
+    --primary-background-color: #f3f4f6;
+    --card-background-color: #ffffff;
+    --app-header-background-color: #6366f1;
+    --app-header-text-color: #ffffff;
+    --primary-text-color: #111827;
+    --secondary-text-color: #6b7280;
+    --divider-color: rgba(0,0,0,0.1);
+  }
 `;
 
 // ============================================================
@@ -490,6 +536,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._createRefineVisible = new Set();  // refine area visibility
     this._createChecked = new Set();        // checkbox selection
 
+    // All automations (used by optimize + consolidate pre-selection)
+    this._automations = [];
+
     // Optimize state
     this._optimizeAutomations = [];
     this._optimizeSelectedId = "";
@@ -506,6 +555,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._consolidateSkipped = new Set();
     this._consolidateRefineTexts = {};
     this._consolidateExpandedYaml = {};
+    this._consolidateSelectedIds = null; // null=未初始化，Set=已选
 
     // Config state
     this._configData = {};
@@ -521,6 +571,10 @@ class HaLlmAutomationPanel extends HTMLElement {
     // Knowledge/Backup state
     this._backups = [];
     this._docPreview = {};  // {key: content}
+
+    // Misc state
+    this._abortSignal = false;
+    this._optimizeDiffMode = "side"; // "side" | "inline"
 
     this._render();
     // Do NOT call _loadAutomations() here — wait for hass to be injected
@@ -608,7 +662,15 @@ class HaLlmAutomationPanel extends HTMLElement {
   async _loadAutomations() {
     try {
       const r = await this._ws("get_automations");
-      this._optimizeAutomations = (r.automations || []).filter(a => a.accessible);
+      this._automations = r.automations || [];
+      this._optimizeAutomations = this._automations.filter(a => a.accessible);
+      // Initialize consolidate selection to all accessible automations (only on first load)
+      const accessibleIds = this._automations
+        .filter(a => a.accessible && a.id && a.id !== "new")
+        .map(a => a.id);
+      if (this._consolidateSelectedIds === null) {
+        this._consolidateSelectedIds = new Set(accessibleIds);
+      }
       this._render();
     } catch (e) {
       // ignore on initial load
@@ -854,8 +916,73 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
+  // Theme toggle & abort
+  // ------------------------------------------------------------------
+
+  _toggleTheme() {
+    const t = this.getAttribute("data-theme");
+    if (!t) this.setAttribute("data-theme", "dark");
+    else if (t === "dark") this.setAttribute("data-theme", "light");
+    else this.removeAttribute("data-theme");
+    this._render();
+  }
+
+  _abort() {
+    this._abortSignal = true;
+    this._loading = false;
+    this._log("[ERROR] 操作已被用户终止");
+    this._render();
+  }
+
+  // ------------------------------------------------------------------
   // Tab: Consolidate
   // ------------------------------------------------------------------
+
+  _selectAllConsolidate(selectAll) {
+    const all = (this._automations || []).filter(a => a.accessible && a.id && a.id !== "new");
+    if (selectAll) {
+      this._consolidateSelectedIds = new Set(all.map(a => a.id));
+    } else {
+      this._consolidateSelectedIds = new Set();
+    }
+    this._render();
+  }
+
+  async _startConsolidateAnalyze() {
+    const selectedIds = [...(this._consolidateSelectedIds || [])];
+    if (selectedIds.length === 0) {
+      this._log("[ERROR] 请至少选择一条自动化");
+      return;
+    }
+    this._abortSignal = false;
+    this._loading = true;
+    this._consolidatePlan = null;
+    this._consolidateApproved = {};
+    this._consolidateSkipped = new Set();
+    this._render();
+
+    try {
+      const sessionId = await this._startSession();
+      const r = await this._ws("consolidate_analyze", {
+        session_id: sessionId,
+        automation_ids: selectedIds,
+      });
+      if (this._abortSignal) return;
+      this._consolidatePlan = r;
+      (r.merge_groups || []).forEach((g, i) => {
+        this._consolidateApproved[`merge_${i}`] = g;
+      });
+      (r.fix_items || []).forEach((f, i) => {
+        this._consolidateApproved[`fix_${i}`] = f;
+      });
+      this._log("[OK] 分析完成");
+    } catch (e) {
+      if (!this._abortSignal) this._log(`[ERROR] 分析失败：${e.message || e}`);
+    } finally {
+      this._loading = false;
+      this._render();
+    }
+  }
 
   async _consolidateAnalyze() {
     const sessionId = await this._startSession();
@@ -1258,16 +1385,25 @@ class HaLlmAutomationPanel extends HTMLElement {
               }).join("")}
             </div>
           ` : ""}
-          <div class="diff-container">
-            <div>
-              <div class="diff-label">优化前</div>
-              ${this._renderYamlBlock(this._optimizeOriginalYaml, "yaml-opt-before")}
-            </div>
-            <div>
-              <div class="diff-label">优化后</div>
-              ${this._renderYamlBlock(genResult.yaml_str, "yaml-opt-after")}
-            </div>
+          <div class="diff-mode-btns">
+            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'side' ? ' active' : ''}" id="btn-diff-side">⇔ 左右对比</button>
+            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'inline' ? ' active' : ''}" id="btn-diff-inline">≡ 内联 diff</button>
           </div>
+          ${this._optimizeDiffMode === 'side' ? `
+            <div class="diff-container">
+              <div>
+                <div class="diff-label">优化前</div>
+                ${this._renderYamlBlock(this._optimizeOriginalYaml, "yaml-opt-before")}
+              </div>
+              <div>
+                <div class="diff-label">优化后</div>
+                ${this._renderYamlBlock(genResult.yaml_str, "yaml-opt-after")}
+              </div>
+            </div>
+          ` : `
+            <div class="diff-label" style="margin-bottom:4px">内联 diff（优化前 → 优化后）</div>
+            <div class="yaml-block">${renderDiff(this._optimizeOriginalYaml, genResult.yaml_str)}</div>
+          `}
           <div class="refine-input" style="margin-top:12px">
             <textarea id="opt-refine-input" placeholder="输入追问修改意见..." rows="2"></textarea>
             <button class="btn btn-secondary btn-sm" id="btn-opt-refine">重新生成</button>
@@ -1288,15 +1424,48 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _renderConsolidate() {
     const plan = this._consolidatePlan;
+    const consolidateAutomations = (this._automations || []).filter(a => a.id && a.id !== "new");
+    const selectedSet = this._consolidateSelectedIds || new Set();
+    const accessibleAutomations = consolidateAutomations.filter(a => a.accessible);
+    const selectedAccessibleCount = accessibleAutomations.filter(a => selectedSet.has(a.id)).length;
+
     return `
       <div class="card">
         <div class="card-title">批量整合自动化</div>
         <p style="color:#9ca3af;margin:0 0 12px;font-size:13px">
           分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。
         </p>
-        <button class="btn btn-primary" id="btn-cons-analyze" ${this._loading ? 'disabled' : ''}>
-          ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '开始分析全部自动化 ▶'}
-        </button>
+
+        ${consolidateAutomations.length > 0 ? `
+          <div class="consolidate-select-panel" style="padding:0 0 12px 0">
+            <div class="panel-label">
+              选择要参与整合的自动化（${selectedAccessibleCount}/${accessibleAutomations.length} 已选）：
+            </div>
+            <div class="automation-checklist" id="consolidate-checklist">
+              ${consolidateAutomations.map(a => `
+                <label class="check-item${!a.accessible ? ' check-item-disabled' : ''}">
+                  <input type="checkbox" class="consolidate-check-item" data-aid="${escHtml(a.id)}"
+                    ${!a.accessible ? 'disabled' : ''}
+                    ${selectedSet.has(a.id) ? 'checked' : ''}>
+                  <span class="check-label">${escHtml(a.alias || a.id)}</span>
+                  ${!a.accessible ? '<span class="check-warning">⚠ 不可访问</span>' : ''}
+                </label>
+              `).join('')}
+            </div>
+            <div class="checklist-actions">
+              <button class="btn btn-secondary btn-sm" id="btn-cons-select-all">☑ 全选</button>
+              <button class="btn btn-secondary btn-sm" id="btn-cons-deselect-all">☐ 全不选</button>
+              <button class="btn btn-primary" id="btn-cons-start-analyze"
+                ${this._loading || selectedAccessibleCount === 0 ? 'disabled' : ''}>
+                ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '▶ 开始分析（' + selectedAccessibleCount + ' 条）'}
+              </button>
+            </div>
+          </div>
+        ` : `
+          <button class="btn btn-primary" id="btn-cons-start-analyze" ${this._loading ? 'disabled' : ''}>
+            ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '开始分析全部自动化 ▶'}
+          </button>
+        `}
       </div>
       ${plan ? this._renderConsolidatePlan(plan) : ""}
     `;
@@ -1482,6 +1651,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
         <div class="config-section">
           <div class="config-section-title">实体筛选（可选）</div>
+          <p class="hint-text">注：以下筛选仅影响发送给 LLM 的设备与实体列表，不影响自动化的分析范围。</p>
 
           <div class="form-row">
             <label class="form-label">额外可见域（逗号分隔，如 notify,remote）</label>
@@ -1650,6 +1820,8 @@ class HaLlmAutomationPanel extends HTMLElement {
       <div class="header">
         <h1>🤖 HA LLM Automation</h1>
         ${this._loading ? '<span class="spinner" style="color:#818cf8"></span>' : ""}
+        ${this._loading ? '<button class="icon-btn abort-btn" id="btn-abort" title="终止当前操作">■</button>' : ""}
+        <button class="icon-btn" id="btn-toggle-theme" title="切换主题">🌓</button>
       </div>
       <div class="tabs">
         ${tabs.map(t => `<div class="tab ${this._tab === t.id ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
@@ -1671,6 +1843,13 @@ class HaLlmAutomationPanel extends HTMLElement {
   _bindEvents() {
     const $ = id => this.shadowRoot.getElementById(id);
     const root = this.shadowRoot;
+
+    // Header buttons
+    const btnAbort = $("btn-abort");
+    if (btnAbort) btnAbort.addEventListener("click", () => this._abort());
+
+    const btnToggleTheme = $("btn-toggle-theme");
+    if (btnToggleTheme) btnToggleTheme.addEventListener("click", () => this._toggleTheme());
 
     // Tabs
     root.querySelectorAll(".tab").forEach(tab => {
@@ -1771,9 +1950,41 @@ class HaLlmAutomationPanel extends HTMLElement {
     const btnOptSave = $("btn-opt-save");
     if (btnOptSave) btnOptSave.addEventListener("click", () => this._optimizeSave());
 
+    const btnDiffSide = $("btn-diff-side");
+    if (btnDiffSide) btnDiffSide.addEventListener("click", () => {
+      this._optimizeDiffMode = "side";
+      this._render();
+    });
+
+    const btnDiffInline = $("btn-diff-inline");
+    if (btnDiffInline) btnDiffInline.addEventListener("click", () => {
+      this._optimizeDiffMode = "inline";
+      this._render();
+    });
+
     // ==== Consolidate tab ====
-    const btnConsAna = $("btn-cons-analyze");
-    if (btnConsAna) btnConsAna.addEventListener("click", () => this._consolidateAnalyze());
+    const btnConsSelAll = $("btn-cons-select-all");
+    if (btnConsSelAll) btnConsSelAll.addEventListener("click", () => this._selectAllConsolidate(true));
+
+    const btnConsDeselAll = $("btn-cons-deselect-all");
+    if (btnConsDeselAll) btnConsDeselAll.addEventListener("click", () => this._selectAllConsolidate(false));
+
+    const btnConsStartAna = $("btn-cons-start-analyze");
+    if (btnConsStartAna) btnConsStartAna.addEventListener("click", () => this._startConsolidateAnalyze());
+
+    // Consolidate checklist checkboxes
+    root.querySelectorAll(".consolidate-check-item").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const aid = cb.dataset.aid;
+        if (!this._consolidateSelectedIds) this._consolidateSelectedIds = new Set();
+        if (cb.checked) {
+          this._consolidateSelectedIds.add(aid);
+        } else {
+          this._consolidateSelectedIds.delete(aid);
+        }
+        this._render();
+      });
+    });
 
     const btnConsExec = $("btn-cons-execute");
     if (btnConsExec) btnConsExec.addEventListener("click", () => this._consolidateExecute());

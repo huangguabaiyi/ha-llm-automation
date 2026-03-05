@@ -4,7 +4,7 @@ HABridge — 用 HA 内置对象替代 cli_tool/ha_client 的 REST 调用。
 - 实体读取：直接使用 hass.states / entity_registry / area_registry / device_registry
 - 自动化 CRUD：通过 aiohttp REST（HA 内部地址 http://localhost:8123）
 - 自动化 reload：hass.services.async_call("automation", "reload")
-- 访问令牌：setup 阶段创建 refresh_token，每次 REST 调用生成新 access_token
+- 访问令牌：setup 阶段获取 refresh_token 对象（长期有效），每次 REST 调用实时生成新 access_token（避免 30 分钟过期）
 """
 from __future__ import annotations
 
@@ -22,21 +22,14 @@ from .automations_utils import validate_automation
 class HABridge:
     """用 hass 内置对象替代 httpx REST 调用。"""
 
-    def __init__(self, hass: HomeAssistant, access_token: str):
+    def __init__(self, hass: HomeAssistant, refresh_token):
         """
-        access_token: setup 阶段生成的 Bearer token，用于 REST 调用
+        refresh_token: setup 阶段创建的 refresh_token 对象（长期有效，不过期）
+        每次 REST 调用通过 _headers() 实时生成新的 access_token（30分钟内有效）
         """
         self._hass = hass
-        self._access_token = access_token
+        self._refresh_token = refresh_token
         self._base_url = "http://localhost:8123"
-
-    # ------------------------------------------------------------------
-    # 属性
-    # ------------------------------------------------------------------
-
-    def update_token(self, token: str) -> None:
-        """更新 access token（token 过期时调用）"""
-        self._access_token = token
 
     # ------------------------------------------------------------------
     # 实体（直接使用 HA Python API，无需 REST）
@@ -228,8 +221,10 @@ class HABridge:
     # ------------------------------------------------------------------
 
     def _headers(self) -> dict[str, str]:
+        # 每次调用实时生成 access_token（同步方法，避免 token 过期问题）
+        fresh_token = self._hass.auth.async_create_access_token(self._refresh_token)
         return {
-            "Authorization": f"Bearer {self._access_token}",
+            "Authorization": f"Bearer {fresh_token}",
             "Content-Type": "application/json",
         }
 
@@ -332,17 +327,17 @@ class HABridge:
 
 async def create_ha_bridge(hass: HomeAssistant, entry_id: str) -> HABridge:
     """
-    创建 HABridge 实例，生成内部 access token。
+    创建 HABridge 实例，获取内部 refresh_token 对象。
     在 async_setup_entry 中调用，将结果存入 hass.data。
     """
-    access_token = await _get_or_create_access_token(hass, entry_id)
-    return HABridge(hass, access_token)
+    refresh_token = await _get_or_create_refresh_token(hass, entry_id)
+    return HABridge(hass, refresh_token)
 
 
-async def _get_or_create_access_token(hass: HomeAssistant, entry_id: str) -> str:
+async def _get_or_create_refresh_token(hass: HomeAssistant, entry_id: str):
     """
-    为集成创建或重用一个 access token。
-    使用第一个非系统管理员用户创建 refresh token，再生成 access token。
+    为集成创建或重用一个 refresh_token 对象（长期有效，不过期）。
+    返回 refresh_token 对象，由 HABridge._headers() 每次调用时实时生成 access_token。
     """
     try:
         users = await hass.auth.async_get_users()
@@ -351,7 +346,7 @@ async def _get_or_create_access_token(hass: HomeAssistant, entry_id: str) -> str
             None,
         )
         if admin_user is None:
-            raise RuntimeError("找不到管理员用户，无法创建 access token")
+            raise RuntimeError("找不到管理员用户，无法创建 refresh token")
 
         client_name = f"ha_llm_automation_{entry_id}"
         # 检查是否已存在同名 refresh token
@@ -360,15 +355,14 @@ async def _get_or_create_access_token(hass: HomeAssistant, entry_id: str) -> str
             if t.client_name == client_name
         ]
         if existing:
-            refresh_token = existing[0]
-        else:
-            # 使用 LONG_LIVED_ACCESS_TOKEN 类型，不需要 client_id，兼容所有 HA 版本
-            from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
-            refresh_token = await hass.auth.async_create_refresh_token(
-                admin_user,
-                client_name=client_name,
-                token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
-            )
-        return hass.auth.async_create_access_token(refresh_token)
+            return existing[0]
+
+        # 使用 LONG_LIVED_ACCESS_TOKEN 类型，不需要 client_id，兼容所有 HA 版本
+        from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+        return await hass.auth.async_create_refresh_token(
+            admin_user,
+            client_name=client_name,
+            token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+        )
     except Exception as e:
-        raise RuntimeError(f"创建 HA access token 失败：{e}") from e
+        raise RuntimeError(f"创建 HA refresh token 失败：{e}") from e

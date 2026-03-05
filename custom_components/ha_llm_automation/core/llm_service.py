@@ -602,9 +602,11 @@ async def run_consolidate_analyze(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     log_callback: LogCallback,
+    automation_ids: list[str] | None = None,
 ) -> dict:
     """
     聚合模式：获取全部自动化 + LLM 分析。
+    automation_ids: 若传入，则只分析指定 ID 的自动化；None 表示分析全部。
     返回 {"merge_groups": [...], "fix_items": [...], "ok_items": [...], "automations_data": [...]}
     """
     bridge = _get_bridge(hass, config_entry)
@@ -632,8 +634,13 @@ async def run_consolidate_analyze(
         except Exception:
             log_callback(f"  跳过 {a.get('alias', aid)}（无法获取配置）")
 
+    # 按用户预选的 ID 过滤
+    if automation_ids is not None:
+        id_set = set(automation_ids)
+        automations_data = [a for a in automations_data if a["id"] in id_set]
+
     if not automations_data:
-        raise RuntimeError("没有可分析的自动化（所有自动化均无法通过 API 获取完整配置）")
+        raise RuntimeError("没有可分析的自动化（选定的自动化均无法通过 API 获取完整配置）")
 
     log_callback(f"获取到 {len(automations_data)} 条可分析的自动化，开始 LLM 分析...")
 
