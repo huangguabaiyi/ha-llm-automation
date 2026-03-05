@@ -247,6 +247,16 @@ const STYLES = `
   .auto-body { padding: 14px 16px; }
   .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .refine-area { margin-top: 10px; display: none; }
+  .load-hint {
+    padding: 20px 0;
+    text-align: center;
+    color: var(--secondary-text-color, #9ca3af);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
   .refine-area.visible { display: block; }
   .refine-input { display: flex; gap: 8px; align-items: flex-start; }
   .refine-input textarea { min-height: 56px; flex: 1; }
@@ -545,7 +555,8 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._createChecked = new Set();        // checkbox selection
 
     // All automations (used by optimize + consolidate pre-selection)
-    this._automations = [];
+    this._automations = null;       // null=未加载，[]+=已加载
+    this._automationsLoading = false;
 
     // Optimize state
     this._optimizeAutomations = [];
@@ -695,6 +706,8 @@ class HaLlmAutomationPanel extends HTMLElement {
   // ------------------------------------------------------------------
 
   async _loadAutomations() {
+    this._automationsLoading = true;
+    this._render();
     try {
       const r = await this._ws("get_automations");
       this._automations = r.automations || [];
@@ -706,9 +719,11 @@ class HaLlmAutomationPanel extends HTMLElement {
       if (this._consolidateSelectedIds === null) {
         this._consolidateSelectedIds = new Set(accessibleIds);
       }
-      this._render();
     } catch (e) {
-      // ignore on initial load
+      // 保留 _automations 的当前值（null=失败，数组=之前成功过）
+    } finally {
+      this._automationsLoading = false;
+      this._render();
     }
   }
 
@@ -1393,16 +1408,30 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div class="card-title">选择要优化的自动化</div>
-        <div class="form-row">
-          <select id="opt-select">
-            <option value="">— 请选择 —</option>
-            ${automations.map(a => `<option value="${escHtml(a.id)}" ${this._optimizeSelectedId === a.id ? "selected" : ""}>${escHtml(a.alias)} [${escHtml(a.id)}]</option>`).join("")}
-          </select>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">选择要优化的自动化</div>
+          <button class="btn btn-secondary btn-sm" id="btn-opt-reload"
+            ${this._automationsLoading ? 'disabled' : ''}>
+            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} 刷新列表
+          </button>
         </div>
-        <button class="btn btn-primary" id="btn-opt-analyze" ${this._loading || !this._optimizeSelectedId ? 'disabled' : ''}>
-          ${this._loading && !analysis ? '<span class="spinner"></span> 分析中...' : '分析意图 ▶'}
-        </button>
+        ${this._automationsLoading ? `
+          <div class="load-hint"><span class="spinner"></span> 正在加载自动化列表...</div>
+        ` : automations.length === 0 ? `
+          <div class="load-hint">
+            ${this._automations === null ? '加载失败，请点击"刷新列表"重试' : '暂无可优化的自动化（存储型）'}
+          </div>
+        ` : `
+          <div class="form-row">
+            <select id="opt-select">
+              <option value="">— 请选择 —</option>
+              ${automations.map(a => `<option value="${escHtml(a.id)}" ${this._optimizeSelectedId === a.id ? "selected" : ""}>${escHtml(a.alias)} [${escHtml(a.id)}]</option>`).join("")}
+            </select>
+          </div>
+          <button class="btn btn-primary" id="btn-opt-analyze" ${this._loading || !this._optimizeSelectedId ? 'disabled' : ''}>
+            ${this._loading && !analysis ? '<span class="spinner"></span> 分析中...' : '分析意图 ▶'}
+          </button>
+        `}
       </div>
 
       ${analysis ? `
@@ -1491,12 +1520,24 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div class="card-title">批量整合自动化</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">批量整合自动化</div>
+          <button class="btn btn-secondary btn-sm" id="btn-cons-reload"
+            ${this._automationsLoading ? 'disabled' : ''}>
+            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} 刷新列表
+          </button>
+        </div>
         <p style="color:#9ca3af;margin:0 0 12px;font-size:13px">
           分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。
         </p>
 
-        ${consolidateAutomations.length > 0 ? `
+        ${this._automationsLoading ? `
+          <div class="load-hint"><span class="spinner"></span> 正在加载自动化列表...</div>
+        ` : consolidateAutomations.length === 0 ? `
+          <div class="load-hint">
+            ${this._automations === null ? '加载失败，请点击"刷新列表"重试' : '暂无可整合的自动化（存储型）'}
+          </div>
+        ` : `
           <div class="consolidate-select-panel" style="padding:0 0 12px 0">
             <div class="panel-label">
               选择要参与整合的自动化（${selectedAccessibleCount}/${accessibleAutomations.length} 已选）：
@@ -1521,10 +1562,6 @@ class HaLlmAutomationPanel extends HTMLElement {
               </button>
             </div>
           </div>
-        ` : `
-          <button class="btn btn-primary" id="btn-cons-start-analyze" ${this._loading ? 'disabled' : ''}>
-            ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '开始分析全部自动化 ▶'}
-          </button>
         `}
       </div>
       ${plan ? this._renderConsolidatePlan(plan) : ""}
@@ -2053,6 +2090,9 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._render();
     });
 
+    const btnOptReload = $("btn-opt-reload");
+    if (btnOptReload) btnOptReload.addEventListener("click", () => this._loadAutomations());
+
     const btnOptAna = $("btn-opt-analyze");
     if (btnOptAna) btnOptAna.addEventListener("click", () => this._optimizeAnalyze());
 
@@ -2081,6 +2121,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     });
 
     // ==== Consolidate tab ====
+    const btnConsReload = $("btn-cons-reload");
+    if (btnConsReload) btnConsReload.addEventListener("click", () => this._loadAutomations());
+
     const btnConsSelAll = $("btn-cons-select-all");
     if (btnConsSelAll) btnConsSelAll.addEventListener("click", () => this._selectAllConsolidate(true));
 
