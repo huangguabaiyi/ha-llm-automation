@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题实时跟随 + 标题颜色修复 + 聚合 prompt 全量覆盖 + 优化追问方向 + 批量勾选执行）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题实时跟随 + 标题颜色修复 + 聚合 prompt 全量覆盖 + 优化追问方向 + 批量勾选执行 + HA 2026.x 静态路径 API 兼容 + 滚动跳顶修复）。
 
 ---
 
@@ -505,6 +505,11 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **聚合批量勾选执行**：聚合结果顶部新增 `.consolidate-batch-bar`（全选/全不选/批量执行按钮）；每条 merge/fix item header 增加 `.cons-item-cb` checkbox，勾选状态与 `_consolidateApproved` 同步
 - **追问按钮更醒目**：创建 Tab 中 `btn-refine-toggle-${i}` 按钮由 `btn-secondary btn-sm` 改为 `btn-primary`
 - **use_docs 标签文字**：改为"在 Prompt 中注入 HA 官方文档（本地缓存，7 天后自动更新；关闭则完全跳过）"
+- **配置保存反馈**：按钮点击后立即禁用并显示"⏳ 保存中..."，完成后恢复，防止重复点击
+- **聚合预选 checkbox 颜色**：`.consolidate-check-item` 新增 `accent-color: #818cf8`，无需 hover 即显示蓝色
+- **优化 step1 重新分析按钮**：分析报告卡片标题右侧新增"🔄 重新分析"按钮，可随时重新执行 step1；direction 标签改为"追加优化方向（传给 Step 2）"
+- **HA 2026.x 静态路径 API 兼容**：`hass.http.register_static_path()` 在 2026.x 被移除，改用 `await hass.http.async_register_static_paths([StaticPathConfig(...)])` + 新增 `from homeassistant.components.http import StaticPathConfig`（兼容 2024.2+）
+- **滚动跳顶修复（Critical UX）**：① `hass` setter 仅在首次注入时调用 `_render()`，避免 HA 每次推送实体状态更新都触发全量重绘；② `_render()` 在重写 innerHTML 前保存 `.content/.main-area` 的 `scrollTop`，重写后立即恢复
 
 ### macOS 退格键 / 方向键异常
 
