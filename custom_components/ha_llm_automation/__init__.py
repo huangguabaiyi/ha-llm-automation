@@ -436,6 +436,7 @@ async def ws_optimize_analyze(hass, connection, msg):
     vol.Required("automation_yaml"): str,
     vol.Required("analysis"): dict,
     vol.Required("session_id"): str,
+    vol.Optional("user_direction"): str,
 })
 @websocket_api.async_response
 async def ws_optimize_generate(hass, connection, msg):
@@ -452,6 +453,7 @@ async def ws_optimize_generate(hass, connection, msg):
             automation_yaml=msg["automation_yaml"],
             analysis=msg["analysis"],
             log_callback=log_cb,
+            user_direction=msg.get("user_direction", ""),
         )
         connection.send_result(msg["id"], result)
     except Exception as e:

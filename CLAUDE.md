@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.2**（token 过期修复 + 聚合预选 + 主题切换 + 终止按钮 + diff 切换 + CSS 修复）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题实时跟随 + 标题颜色修复 + 聚合 prompt 全量覆盖 + 优化追问方向 + 批量勾选执行）。
 
 ---
 
@@ -496,13 +496,23 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **聚合模块**：`run_consolidate_analyze` 新增 `automation_ids` 参数，前端聚合 Tab 加预选 checkbox 列表
 - **前端新增**：主题切换（🌓 循环三态）、终止按钮（■）、优化 diff 切换（左右/内联）、配置页筛选备注
 
+### v2.3 已修复 / 新增
+
+- **系统主题实时跟随**：`connectedCallback/disconnectedCallback` 增加 `prefers-color-scheme` matchMedia 监听，系统切换主题时页面自动重绘
+- **标题颜色修复**：`.header h1` 改为 `var(--app-header-text-color, #ffffff)`，亮色 header（蓝色背景）下可见
+- **聚合 prompt 全量覆盖**：`build_consolidate_prompt` 合并条件改为**以场景为唯一依据**（去掉时间差匹配条件，触发时间不一致也可合并），新增「强制要求」段确保每条自动化出现在三个列表之一、不得遗漏
+- **优化追问方向**：分析结果卡片（step1）增加可选方向 textarea（`#opt-direction-input`）；`run_optimize_generate` 新增 `user_direction` 参数，`ws_optimize_generate` schema 同步新增 `vol.Optional("user_direction")`
+- **聚合批量勾选执行**：聚合结果顶部新增 `.consolidate-batch-bar`（全选/全不选/批量执行按钮）；每条 merge/fix item header 增加 `.cons-item-cb` checkbox，勾选状态与 `_consolidateApproved` 同步
+- **追问按钮更醒目**：创建 Tab 中 `btn-refine-toggle-${i}` 按钮由 `btn-secondary btn-sm` 改为 `btn-primary`
+- **use_docs 标签文字**：改为"在 Prompt 中注入 HA 官方文档（本地缓存，7 天后自动更新；关闭则完全跳过）"
+
 ### macOS 退格键 / 方向键异常
 
 **已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。
 
 ---
 
-## 十二、HACS Custom Component（已实现，v2.2）
+## 十二、HACS Custom Component（已实现，v2.3）
 
 `custom_components/ha_llm_automation/` 已完整实现，结构如下：
 
@@ -513,10 +523,10 @@ custom_components/ha_llm_automation/
 ├── const.py             ← CONF_LOG_PROMPT/USE_DOCS/AREA_FILTER/LABEL_FILTER/INTEGRATION_FILTER
 ├── core/
 │   ├── ha_bridge.py     ← HABridge（存refresh_token对象，_headers()实时生成access_token）
-│   ├── llm_service.py   ← 三大模式async化；run_consolidate_analyze支持automation_ids过滤
+│   ├── llm_service.py   ← 三大模式async化；run_optimize_generate支持user_direction参数
 │   └── automations_utils.py
 ├── knowledge/ / llm_client/ / backup/
-└── frontend/ha-llm-automation.js  ← v2.2 前端
+└── frontend/ha-llm-automation.js  ← v2.3 前端
 ```
 
 ### 关键设计决策

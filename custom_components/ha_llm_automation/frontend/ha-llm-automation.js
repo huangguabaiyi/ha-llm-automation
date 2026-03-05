@@ -66,7 +66,7 @@ const STYLES = `
     font-size: 17px;
     font-weight: 700;
     flex: 1;
-    color: #818cf8;
+    color: var(--app-header-text-color, #ffffff);
     letter-spacing: 0.02em;
   }
   .tabs {
@@ -496,6 +496,13 @@ const STYLES = `
   .btn-sm-plain:hover { background: rgba(255,255,255,0.08); }
   .btn-sm.active { background: rgba(99,102,241,0.2); border-color: #6366f1; color: #818cf8; }
   .diff-mode-btns { display: flex; gap: 6px; margin-bottom: 8px; }
+  .consolidate-batch-bar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 8px 12px; border-bottom: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+    margin-bottom: 8px; background: rgba(255,255,255,0.02); border-radius: 6px 6px 0 0;
+  }
+  .consolidate-batch-bar .hint-text { font-size: 12px; color: var(--secondary-text-color, #9ca3af); flex: 1; }
+  .cons-item-cb { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; accent-color: #818cf8; }
   :host([data-theme="dark"]) {
     --primary-background-color: #0f1117;
     --card-background-color: #1e2433;
@@ -578,6 +585,23 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     this._render();
     // Do NOT call _loadAutomations() here — wait for hass to be injected
+  }
+
+  connectedCallback() {
+    this._mqListener = () => {
+      // 仅当未强制主题时跟随系统切换
+      if (!this.hasAttribute("data-theme")) this._render();
+    };
+    window.matchMedia("(prefers-color-scheme: dark)")
+      .addEventListener("change", this._mqListener);
+  }
+
+  disconnectedCallback() {
+    if (this._mqListener) {
+      window.matchMedia("(prefers-color-scheme: dark)")
+        .removeEventListener("change", this._mqListener);
+      this._mqListener = null;
+    }
   }
 
   set hass(val) {
@@ -843,6 +867,8 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   async _optimizeGenerate() {
     const sessionId = await this._startSession();
+    const directionEl = this.shadowRoot.querySelector("#opt-direction-input");
+    const userDirection = directionEl ? directionEl.value.trim() : "";
     this._loading = true;
     this._optimizeGenResult = null;
     this._render();
@@ -852,6 +878,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         automation_yaml: this._optimizeAutoYaml,
         analysis: this._optimizeAnalysis,
         session_id: sessionId,
+        ...(userDirection ? { user_direction: userDirection } : {}),
       });
       this._optimizeGenResult = r;
       this._optimizeSystemPrompt = r.system_prompt || "";
@@ -1313,7 +1340,7 @@ class HaLlmAutomationPanel extends HTMLElement {
               ${hasWarnings ? `<div class="error-box">${item.warnings.map(w => escHtml(w)).join("<br>")}</div>` : ""}
               ${this._renderYamlBlock(item.yaml_str, `yaml-${i}`)}
               <div class="btn-row">
-                <button class="btn btn-secondary btn-sm" id="btn-refine-toggle-${i}">
+                <button class="btn btn-primary" id="btn-refine-toggle-${i}">
                   ${refineVisible ? '▲ 收起追问' : '✏ 追问修改'}
                 </button>
               </div>
@@ -1366,6 +1393,11 @@ class HaLlmAutomationPanel extends HTMLElement {
               <div style="font-size:12px;font-weight:700;color:#4ade80;margin-top:8px;margin-bottom:4px">✦ 优化建议：</div>
               <ul class="analysis-list analysis-suggs">${analysis.suggestions.map(s => `<li>✦ ${escHtml(s)}</li>`).join("")}</ul>
             ` : ""}
+          </div>
+          <div style="margin: 10px 0 6px">
+            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">优化方向（可选）</label>
+            <textarea id="opt-direction-input" rows="2"
+              placeholder="可补充额外优化方向，如：增加夜间时段限制、补全其他区域灯..."></textarea>
           </div>
           <button class="btn btn-primary" id="btn-opt-generate" ${this._loading ? 'disabled' : ''}>
             ${this._loading && !genResult ? '<span class="spinner"></span> 生成中...' : '生成优化方案 ▶'}
@@ -1479,12 +1511,24 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div class="card-title" style="margin:0">聚合方案</div>
           <div style="font-size:12px;color:#9ca3af">
             合并 ${merges.length} · 修复 ${fixes.length} · 无需修改 ${oks.length}
           </div>
         </div>
+
+        ${(merges.length + fixes.length) > 0 ? `
+          <div class="consolidate-batch-bar">
+            <span class="hint-text">已勾选 ${approvedCount} 项</span>
+            <button class="btn-sm btn-sm-plain" id="btn-cs-all">☑ 全选</button>
+            <button class="btn-sm btn-sm-plain" id="btn-cs-none">☐ 全不选</button>
+            <button class="btn btn-primary btn-sm" id="btn-cs-execute"
+              ${this._loading || approvedCount === 0 ? 'disabled' : ''}>
+              ▶ 批量执行（${approvedCount} 项）
+            </button>
+          </div>
+        ` : ""}
 
         ${merges.map((g, i) => {
           const key = `merge_${i}`;
@@ -1494,6 +1538,8 @@ class HaLlmAutomationPanel extends HTMLElement {
           return `
             <div class="automation-card ${skipped ? "skipped" : approved ? "approved" : ""}">
               <div class="automation-header" id="cons-hdr-merge-${i}">
+                <input type="checkbox" class="cons-item-cb" data-key="merge_${i}"
+                  ${approved && !skipped ? 'checked' : ''}>
                 <span class="tag tag-merge">合并</span>
                 <span class="auto-title">场景：${escHtml(g.scenario || "")}</span>
                 <span style="font-size:11px;color:#9ca3af">${(g.aliases || []).slice(0,3).join(" + ")}${g.aliases?.length > 3 ? '…' : ''}</span>
@@ -1539,6 +1585,8 @@ class HaLlmAutomationPanel extends HTMLElement {
           return `
             <div class="automation-card ${skipped ? "skipped" : approved ? "approved" : ""}">
               <div class="automation-header" id="cons-hdr-fix-${i}">
+                <input type="checkbox" class="cons-item-cb" data-key="fix_${i}"
+                  ${approved && !skipped ? 'checked' : ''}>
                 <span class="tag tag-fix">修复</span>
                 <span class="auto-title">${escHtml(f.alias || f.id)}</span>
                 <span style="font-size:11px;color:#f87171">${escHtml((f.issue || "").slice(0, 50))}</span>
@@ -1700,7 +1748,7 @@ class HaLlmAutomationPanel extends HTMLElement {
           </label>
           <label class="checkbox-row" style="margin-top:8px">
             <input type="checkbox" id="cfg-use-docs" ${c.use_docs !== false ? 'checked' : ''}>
-            调用 LLM 时携带 HA 官方文档知识（缓存 7 天，关闭可跳过文档加载）
+            在 Prompt 中注入 HA 官方文档（本地缓存，7 天后自动更新；关闭则完全跳过）
           </label>
         </div>
 
@@ -1981,6 +2029,58 @@ class HaLlmAutomationPanel extends HTMLElement {
           this._consolidateSelectedIds.add(aid);
         } else {
           this._consolidateSelectedIds.delete(aid);
+        }
+        this._render();
+      });
+    });
+
+    // Batch bar buttons
+    const btnCsAll = $("btn-cs-all");
+    if (btnCsAll) btnCsAll.addEventListener("click", () => {
+      if (this._consolidatePlan) {
+        (this._consolidatePlan.merge_groups || []).forEach((g, i) => {
+          this._consolidateApproved[`merge_${i}`] = g;
+          this._consolidateSkipped.delete(`merge_${i}`);
+        });
+        (this._consolidatePlan.fix_items || []).forEach((f, i) => {
+          this._consolidateApproved[`fix_${i}`] = f;
+          this._consolidateSkipped.delete(`fix_${i}`);
+        });
+      }
+      this._render();
+    });
+    const btnCsNone = $("btn-cs-none");
+    if (btnCsNone) btnCsNone.addEventListener("click", () => {
+      if (this._consolidatePlan) {
+        (this._consolidatePlan.merge_groups || []).forEach((_, i) => {
+          this._consolidateSkipped.add(`merge_${i}`);
+          delete this._consolidateApproved[`merge_${i}`];
+        });
+        (this._consolidatePlan.fix_items || []).forEach((_, i) => {
+          this._consolidateSkipped.add(`fix_${i}`);
+          delete this._consolidateApproved[`fix_${i}`];
+        });
+      }
+      this._render();
+    });
+    const btnCsExec = $("btn-cs-execute");
+    if (btnCsExec) btnCsExec.addEventListener("click", () => this._consolidateExecute());
+
+    // Per-item checkboxes
+    root.querySelectorAll(".cons-item-cb").forEach(cb => {
+      cb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = cb.dataset.key;
+        if (!key || !this._consolidatePlan) return;
+        const [type, idxStr] = key.split("_");
+        const idx = parseInt(idxStr, 10);
+        if (cb.checked) {
+          if (type === "merge") this._consolidateApproved[key] = this._consolidatePlan.merge_groups[idx];
+          else this._consolidateApproved[key] = this._consolidatePlan.fix_items[idx];
+          this._consolidateSkipped.delete(key);
+        } else {
+          this._consolidateSkipped.add(key);
+          delete this._consolidateApproved[key];
         }
         this._render();
       });

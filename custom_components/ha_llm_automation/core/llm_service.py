@@ -486,6 +486,7 @@ async def run_optimize_generate(
     automation_yaml: str,
     analysis: dict,
     log_callback: LogCallback,
+    user_direction: str = "",
 ) -> dict:
     """
     优化模式 Step 2：生成优化后 YAML。
@@ -523,11 +524,15 @@ async def run_optimize_generate(
     system_prompt = build_optimize_yaml_prompt(
         automation_yaml, analysis, entities, docs, visible_domains=visible_domains
     )
+    user_msg = "请生成优化后的完整自动化 YAML 配置。"
+    if user_direction.strip():
+        user_msg += f"\n\n用户指定的优化方向：{user_direction}"
+
     log_callback("Step 2/2 — 生成优化 YAML...")
     _maybe_log_prompt(config_entry, log_callback, system_prompt)
     try:
         response = await llm(
-            messages=[{"role": "user", "content": "请生成优化后的完整自动化 YAML 配置。"}],
+            messages=[{"role": "user", "content": user_msg}],
             system=system_prompt,
         )
     except Exception as e:
