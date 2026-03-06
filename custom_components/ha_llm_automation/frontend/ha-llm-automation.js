@@ -144,7 +144,6 @@ const STYLES = `
     resize: vertical;
     box-sizing: border-box;
     outline: none;
-    backdrop-filter: blur(6px);
     transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
   }
   textarea:focus, input:focus, select:focus {
@@ -272,6 +271,13 @@ const STYLES = `
     30%  { height: 50%; opacity: 0.9; transform: scaleY(1); }
     70%  { height: 75%; opacity: 0.4; }
     100% { height: 100%; opacity: 0; transform: scaleY(1.1); }
+  }
+  /* 触摸设备（手机/平板）：禁用会触发 GPU 合成层重绘的动画，防止键盘弹出时自动收起 */
+  @media (hover: none) and (pointer: coarse) {
+    .input-wrap::before { animation: none; }
+    .input-wrap::after { will-change: auto; }
+    .input-wrap:focus-within::after { animation: none; }
+    .input-wrap:focus-within::before { opacity: 0.6; }
   }
   .btn {
     display: inline-flex;
@@ -862,9 +868,8 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._delInaccessibleRunning = true;
     this._render();
     try {
-      const r = await this._ws("delete_inaccessible_automations", {
-        automation_ids: inaccessible.map(a => a.id),
-      });
+      // 后端自动探测并删除，不依赖前端传 ID（规避 HA WS 数组参数兼容性问题）
+      const r = await this._ws("delete_inaccessible_automations");
       const deleted = r.deleted || [];
       const failed = r.failed || [];
       if (failed.length > 0) {

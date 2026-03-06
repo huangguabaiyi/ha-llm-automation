@@ -302,11 +302,10 @@ async def ws_get_automations(hass, connection, msg):
 
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/delete_inaccessible_automations",
-    vol.Optional("automation_ids", default=[]): [str],
 })
 @websocket_api.async_response
 async def ws_delete_inaccessible_automations(hass, connection, msg):
-    """删除前端已标记为 accessible=false 的自动化（直接传 ID，无需后端重新探测）"""
+    """后端自动探测 accessible=false 的自动化并删除（YAML型/GET失败的）"""
     entry = _get_entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_configured", "尚未配置")
@@ -314,10 +313,21 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
     from .core.ha_bridge import HABridge
     bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
     try:
-        automation_ids: list[str] = msg["automation_ids"]
+        automations = await bridge.list_automations()
+        # 探测不可访问的自动化（GET失败 = YAML型）
+        inaccessible_ids = []
+        for a in automations:
+            aid = a.get("id", "")
+            if not aid or aid == "new":
+                continue
+            try:
+                await bridge.get_automation_config(aid)
+            except Exception:
+                inaccessible_ids.append(aid)
+        # 删除
         deleted = []
         failed = []
-        for aid in automation_ids:
+        for aid in inaccessible_ids:
             try:
                 await bridge.delete_automation(aid)
                 deleted.append({"id": aid})
@@ -325,7 +335,7 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
                 failed.append({"id": aid, "error": str(e)})
         if deleted:
             await bridge.reload_automations()
-        connection.send_result(msg["id"], {"deleted": deleted, "failed": failed})
+        connection.send_result(msg["id"], {"deleted": deleted, "failed": failed, "scanned": len(automations)})
     except Exception as e:
         connection.send_error(msg["id"], "error", str(e))
 
