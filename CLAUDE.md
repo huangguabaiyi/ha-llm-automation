@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.3**（系统主题跟随 + 聚合全量覆盖 + 优化追问方向 + 批量勾选 + HA2026兼容 + 滚动修复 + 6项 UX/可靠性修复 + 列表加载状态 UX）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.4**（v2.3基础上新增：清除不可访问自动化 + HACS/侧边栏图标 + 液态荡漾输入框 + 备份完整性修复）。
 
 ---
 
@@ -486,7 +486,8 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
-- [ ] `backup restore`：逐条恢复流程完整性验证
+- [ ] 清除不可访问自动化（YAML 型）：DELETE 端点对 YAML 型是否成功待实测；若 HA 返回错误可在 Toast 中看到具体原因
+- [ ] HACS 卡片图标：需推送至 GitHub + 通过 HACS 安装才可生效；本地部署阶段无法展示
 
 ### v2.2 已修复
 
@@ -518,27 +519,36 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **配置保存 Toast + 表单值持久**：`_render()` 前保存 `.toast-container` 子节点 + 8 个配置输入字段值，重写 innerHTML 后恢复，Toast 不再消失、表单不再被 re-render 重置
 - **自动化列表加载状态 UX**：`_automations` 从 `[]` 改为 `null` 区分「未加载」与「已加载为空」；新增 `_automationsLoading` 标志；优化/聚合 Tab 选择卡片顶部各加「🔄 刷新列表」按钮，显示三态：加载中（spinner）/ 加载失败（null，提示重试）/ 无数据（已加载但空）
 
+### v2.4 已修复 / 新增
+
+- **备份内容完整性（Critical 修复）**：备份前改为逐条调用 `GET /api/config/automation/config/{id}` 获取完整配置（含 triggers/actions）；三处备份调用（create/optimize/consolidate）统一使用 `_get_full_automations_for_backup()` helper，跳过 YAML 型
+- **清除不可访问自动化**：聚合 Tab 新增「🗑 清除不可访问（N 条）」红色按钮；后端 `ws_delete_inaccessible_automations` 逐条检测 → DELETE → reload；`delete_automation` 失败时捕获 HA 响应体抛出详细错误
+- **HACS 图标**：`custom_components/ha_llm_automation/icon.png`（256×256 RGBA）；HACS 卡片图标需 GitHub 仓库才生效，本地阶段 icon.png 已就位
+- **侧边栏图标**：`PANEL_ICON = "mdi:creation"`（AI 魔法星花，`const.py`）
+- **液态荡漾输入框**：全局 textarea/input 玻璃磨砂效果；`.input-wrap` 三处主输入框（创建需求/优化方向/优化追问）加流光渐变边框 + 呼吸光晕 + 液态荡漾高光动画；亮/暗主题适配
+
 ### macOS 退格键 / 方向键异常
 
 **已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。
 
 ---
 
-## 十二、HACS Custom Component（已实现，v2.3）
+## 十二、HACS Custom Component（已实现，v2.4）
 
 `custom_components/ha_llm_automation/` 已完整实现，结构如下：
 
 ```
 custom_components/ha_llm_automation/
-├── __init__.py          ← setup_entry + 24个WS命令 + 面板注册 + 旧配置迁移
+├── __init__.py          ← setup_entry + 25个WS命令 + 面板注册 + 旧配置迁移
 ├── config_flow.py       ← 纯确认步骤（无字段，全配置在前端配置Tab完成）
-├── const.py             ← CONF_LOG_PROMPT/USE_DOCS/AREA_FILTER/LABEL_FILTER/INTEGRATION_FILTER
+├── const.py             ← CONF_LOG_PROMPT/USE_DOCS/AREA_FILTER/LABEL_FILTER/INTEGRATION_FILTER；PANEL_ICON="mdi:creation"
 ├── core/
-│   ├── ha_bridge.py     ← HABridge（存refresh_token对象，_headers()实时生成access_token）
-│   ├── llm_service.py   ← 三大模式async化；run_optimize_generate支持user_direction参数
+│   ├── ha_bridge.py     ← HABridge；delete_automation 捕获响应体
+│   ├── llm_service.py   ← 三大模式async化；_get_full_automations_for_backup() 备份完整配置
 │   └── automations_utils.py
 ├── knowledge/ / llm_client/ / backup/
-└── frontend/ha-llm-automation.js  ← v2.3 前端
+├── icon.png             ← HACS 图标（256×256 RGBA）
+└── frontend/ha-llm-automation.js  ← v2.4 前端（液态荡漾输入框）
 ```
 
 ### 关键设计决策
