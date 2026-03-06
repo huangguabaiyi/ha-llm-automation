@@ -316,7 +316,7 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
         automations = await bridge.list_automations()
         _LOGGER.info("delete_inaccessible: 共扫描到 %d 条自动化", len(automations))
         # 探测不可访问的自动化（GET失败 = YAML型）
-        inaccessible_ids = []
+        inaccessible = []  # list of {"id": ..., "alias": ...}
         for a in automations:
             aid = a.get("id", "")
             alias = a.get("alias", aid)
@@ -330,23 +330,34 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
                     "delete_inaccessible: GET config 失败 id=%s alias=%r → 标记为不可访问 | 原因: %s",
                     aid, alias, e,
                 )
-                inaccessible_ids.append(aid)
-        _LOGGER.info("delete_inaccessible: 发现 %d 条不可访问自动化，准备删除", len(inaccessible_ids))
+                inaccessible.append({"id": aid, "alias": alias})
+        _LOGGER.info("delete_inaccessible: 发现 %d 条不可访问自动化，准备删除", len(inaccessible))
         # 删除
         deleted = []
         failed = []
-        for aid in inaccessible_ids:
+        for item in inaccessible:
+            aid, alias = item["id"], item["alias"]
             try:
                 await bridge.delete_automation(aid)
-                deleted.append({"id": aid})
-                _LOGGER.info("delete_inaccessible: 已删除 id=%s", aid)
+                deleted.append({"id": aid, "alias": alias})
+                _LOGGER.info("delete_inaccessible: 已删除 id=%s alias=%r", aid, alias)
             except Exception as e:
                 err_str = str(e)
-                failed.append({"id": aid, "error": err_str})
-                _LOGGER.error(
-                    "delete_inaccessible: 删除失败 id=%s | 原因: %s",
-                    aid, err_str,
-                )
+                # "Resource not found" 是 YAML 型自动化的预期失败——DELETE API 无法操作 YAML 型
+                # 需在 automations.yaml 中手动删除
+                is_yaml_type = "resource not found" in err_str.lower() or "not found" in err_str.lower()
+                if is_yaml_type:
+                    _LOGGER.warning(
+                        "delete_inaccessible: YAML型自动化无法通过API删除 id=%s alias=%r"
+                        " → 请在 automations.yaml 中手动删除该条目 | HA返回: %s",
+                        aid, alias, err_str,
+                    )
+                else:
+                    _LOGGER.error(
+                        "delete_inaccessible: 删除失败 id=%s alias=%r | 原因: %s",
+                        aid, alias, err_str,
+                    )
+                failed.append({"id": aid, "alias": alias, "error": err_str, "yaml_type": is_yaml_type})
         if deleted:
             await bridge.reload_automations()
             _LOGGER.info("delete_inaccessible: reload 完成，成功删除 %d 条，失败 %d 条", len(deleted), len(failed))

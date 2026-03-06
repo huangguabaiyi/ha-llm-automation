@@ -621,6 +621,7 @@ const STYLES = `
   }
   .toast.success { border-color: #059669; color: #4ade80; }
   .toast.error { border-color: #dc2626; color: #f87171; }
+  .toast.warn { border-color: #d97706; color: #fbbf24; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
   .checkbox-row {
     display: flex; align-items: center; gap: 8px; cursor: pointer;
@@ -878,7 +879,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   async _deleteInaccessible() {
     const inaccessible = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible === false);
     if (inaccessible.length === 0) return;
-    if (!confirm(`确定要删除全部 ${inaccessible.length} 条不可访问的 YAML 型自动化吗？此操作不可撤销。`)) return;
+    if (!confirm(`确定要清除全部 ${inaccessible.length} 条不可访问的 YAML 型自动化吗？\n\n注意：YAML 型自动化无法通过 API 删除，需在 HA 的 automations.yaml 文件中手动删除对应条目。`)) return;
     this._delInaccessibleRunning = true;
     this._render();
     try {
@@ -888,9 +889,19 @@ class HaLlmAutomationPanel extends HTMLElement {
       const failed = r.failed || [];
       const scanned = r.scanned ?? "?";
       this._log(`[INFO] 清除不可访问：扫描 ${scanned} 条，删除成功 ${deleted.length} 条，失败 ${failed.length} 条`);
-      if (failed.length > 0) {
-        failed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id}：${f.error}`));
-        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败（见日志）`, "error");
+      const yamlFailed = failed.filter(f => f.yaml_type);
+      const realFailed = failed.filter(f => !f.yaml_type);
+      // YAML 型：API 无法删除，提示手动操作
+      if (yamlFailed.length > 0) {
+        this._log(`[WARN] ${yamlFailed.length} 条 YAML 型自动化无法通过 API 删除，需在 automations.yaml 中手动删除：`);
+        yamlFailed.forEach(f => this._log(`  • ${f.alias || f.id}`));
+      }
+      // 真正的错误
+      realFailed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id} ${f.alias ? `(${f.alias})` : ""}：${f.error}`));
+      if (realFailed.length > 0) {
+        this._toast(`已删除 ${deleted.length} 条，${realFailed.length} 条异常失败（见日志）`, "error");
+      } else if (yamlFailed.length > 0) {
+        this._toast(`已删除 ${deleted.length} 条；${yamlFailed.length} 条 YAML 型需手动删除（见日志）`, "warn");
       } else {
         this._toast(`已删除 ${deleted.length} 条不可访问的自动化`, "success");
       }

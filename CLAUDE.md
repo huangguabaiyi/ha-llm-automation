@@ -162,17 +162,17 @@ get_entities(config) -> list[dict]
 | 获取单条完整配置 | `GET /api/config/automation/config/{id}` | ⚠️ 仅对「存储型」自动化有效（见下）|
 | **创建自动化** | `POST /api/config/automation/config/new` | ✅（有特殊要求，见下）|
 | **更新自动化** | `POST /api/config/automation/config/{id}` | ✅（非 PUT）|
-| 删除自动化 | `DELETE /api/config/automation/config/{id}` | ✅ |
+| 删除自动化 | `DELETE /api/config/automation/config/{id}` | ⚠️ 仅存储型有效；YAML 型返回 400 "Resource not found"，只能手动编辑 automations.yaml |
 | 重载配置 | `POST /api/services/automation/reload` | ✅ |
 
 ### ⚠️ 「存储型」vs「YAML型」自动化
 
 HA 中存在两类自动化：
 
-| 类型 | 存储位置 | GET 完整配置 | 说明 |
-|------|---------|------------|------|
-| **存储型** | HA `.storage/` | ✅ | 通过 HA UI 或本工具 REST API 创建 |
-| **YAML型** | `automations.yaml` | ❌ 404 | 手动在配置文件中定义 |
+| 类型 | 存储位置 | GET 完整配置 | DELETE | 说明 |
+|------|---------|------------|--------|------|
+| **存储型** | HA `.storage/` | ✅ | ✅ | 通过 HA UI 或本工具 REST API 创建 |
+| **YAML型** | `automations.yaml` | ❌ 404 | ❌ 400 | 手动在配置文件中定义；只能编辑 automations.yaml 删除 |
 
 `/api/states` 两类都会列出（包含 `attributes.id`），但 GET 完整配置只对存储型有效。
 `optimize` 和 `consolidate` 命令启动时自动探测并过滤，只展示可访问的自动化。
@@ -486,7 +486,7 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
-- [ ] 清除不可访问自动化（YAML 型）：DELETE 端点对 YAML 型是否成功待实测；错误详情已完整打到 HA 日志 + 前端日志面板（v2.4.1）
+- [ ] 清除不可访问自动化（YAML 型）：DELETE `/api/config/automation/config/{id}` 对 YAML 型返回 400 "Resource not found"（已确认）——**YAML 型自动化只能手动编辑 `automations.yaml` 删除**；前端已区分 YAML 型失败（warn 橙色提示+列出 alias）与真正错误（red error）
 - [ ] HACS 卡片图标：需推送至 GitHub + 通过 HACS 安装才可生效；本地部署阶段无法展示
 
 ### v2.2 已修复
