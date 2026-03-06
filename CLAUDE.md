@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.5**（v2.4基础上新增：自动化管理 Tab + 备份增量/覆盖恢复模式 + 主题按钮三态区分）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.5.1**（v2.5基础上：移动端输入框 CSS 精准优化，保留流光渐变边框动画）。
 
 ---
 
@@ -534,6 +534,15 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **自动化管理 Tab（📋 管理）**：列出全部自动化，支持批量勾选；批量操作栏含「全选/全不选/备份选中(N)/删除选中(N)」；不可访问条目禁用勾选；批量删除后自动 reload；后端新增 `ws_batch_delete_automations`（逗号分隔ID规避WS数组兼容）和 `ws_backup_selected`（生成子集备份文件）
 - **备份恢复双模式**：备份管理卡顶部增加模式切换按钮；**增量**（跳过已有同名自动化）/ **覆盖**（已有则 update，否则 create）；模式持久到 `_restoreMode` 状态，确认弹窗显示当前模式；后端 `run_restore_backup` 新增 `restore_mode` 参数，覆盖模式通过 alias 匹配现有 id 执行 `update_automation`
 - **主题按钮三态区分**：`🖥️ 自动`（半透明边框）/ `🌙 暗色`（紫色背景+边框）/ `☀️ 亮色`（金色背景+边框）；按钮同步显示当前状态文字标签
+
+### v2.5.1 移动端 CSS 精准优化
+
+- **问题**：前版过度禁用了 touch 设备 CSS 动画（`inputGradientFlow` 被禁），手机效果远弱于桌面
+- **核心洞察**：区分"在 focus 前已运行"（安全）vs"在 focus 时启动/变化"（危险）：
+  - **安全**：`inputGradientFlow`（渐变边框）在 focus 前就在播，focus 时不触发新的合成层变化 → 保留（降频 6s）
+  - **危险**：`inputLiquidRipple`（荡漾高光）从 focus 开始启动；`box-shadow` 在 focus 时从无到有；`transition` 在 focus 时产生渐变 → 全部禁用
+- **修复**：`@media (hover:none)` 内仅保留 `inputGradientFlow`（6s）；禁用 `inputLiquidRipple`；所有 `transition: none !important`；所有 focus 触发的 `box-shadow: none !important`；补偿：`.input-wrap` 加常驻微光（不依赖 focus，无变化）
+- **结果**：手机端流光渐变边框 + 常驻微光保留；键盘稳定不收起；桌面端完整效果不变
 
 ### macOS 退格键 / 方向键异常
 

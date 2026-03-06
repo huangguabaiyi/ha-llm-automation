@@ -272,25 +272,35 @@ const STYLES = `
     70%  { height: 75%; opacity: 0.4; }
     100% { height: 100%; opacity: 0; transform: scaleY(1.1); }
   }
-  /* 触摸设备（手机/平板）：禁用会触发 GPU 合成层重绘的动画/过渡/阴影，防止键盘弹出时自动收起 */
+  /* 触摸设备（手机/平板）键盘收起防护
+   *
+   * 只禁用"focus 瞬间触发的 CSS 变化"——这才是让 WebKit 收起键盘的根因。
+   * 流光渐变动画在 focus 前已在运行，focus 时不触发任何变化，可以安全保留。
+   */
   @media (hover: none) and (pointer: coarse) {
-    .input-wrap::before { animation: none; }
+    /* ── 流光渐变边框：保留，只把频率降低一点省性能 ── */
+    .input-wrap::before {
+      animation-duration: 6s;
+      opacity: 0.45;      /* 常驻稍亮，不靠 focus 才能看见 */
+      transition: none;   /* 无过渡 → opacity 变化为单帧，安全 */
+    }
+    .input-wrap:focus-within::before {
+      opacity: 1;         /* focus 时全亮（瞬时，无 transition） */
+    }
+    /* ── 液态荡漾高光：从 focus 时启动 → 危险，保持禁用 ── */
     .input-wrap::after { will-change: auto; }
     .input-wrap:focus-within::after { animation: none; }
-    .input-wrap:focus-within::before { opacity: 0.6; }
-    /* 彻底禁用 focus 时的 transition / box-shadow / background 变化，
-       防止切 Tab 后 DOM 重建、键盘弹出期间任何 GPU 合成层变动触发收起 */
+    /* ── input/textarea 的 transition 全禁：防 focus 渐变触发合成层重建 ── */
     textarea, input[type=text], input[type=password], input[type=number], select {
       transition: none !important;
     }
-    textarea:focus, input:focus, select:focus {
-      box-shadow: none !important;
-    }
-    .input-wrap:focus-within {
-      box-shadow: none !important;
-    }
-    .input-wrap textarea:focus {
-      box-shadow: none !important;
+    /* ── focus 时新增的 box-shadow 全禁：这才是键盘收起的直接原因 ── */
+    textarea:focus, input:focus, select:focus { box-shadow: none !important; }
+    .input-wrap:focus-within { box-shadow: none !important; }
+    .input-wrap textarea:focus { box-shadow: none !important; }
+    /* ── 补偿：给容器加常驻微光（不依赖 focus，不触发变化） ── */
+    .input-wrap {
+      box-shadow: 0 0 0 1px rgba(129,140,248,0.18), 0 2px 14px rgba(129,140,248,0.10);
     }
   }
   .btn {
