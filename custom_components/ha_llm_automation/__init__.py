@@ -302,7 +302,7 @@ async def ws_get_automations(hass, connection, msg):
 
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/delete_inaccessible_automations",
-    vol.Required("automation_ids"): [str],
+    vol.Optional("automation_ids", default=[]): [str],
 })
 @websocket_api.async_response
 async def ws_delete_inaccessible_automations(hass, connection, msg):
