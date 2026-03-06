@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.4**（v2.3基础上新增：清除不可访问自动化 + HACS/侧边栏图标 + 液态荡漾输入框 + 备份完整性修复 + HA WS数组兼容修复 + 移动端键盘收起修复）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.5**（v2.4基础上新增：自动化管理 Tab + 备份增量/覆盖恢复模式 + 主题按钮三态区分）。
 
 ---
 
@@ -528,6 +528,12 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **HACS 图标**：`custom_components/ha_llm_automation/icon.png`（256×256 RGBA）；HACS 卡片图标需 GitHub 仓库才生效，本地阶段 icon.png 已就位
 - **侧边栏图标**：`PANEL_ICON = "mdi:creation"`（AI 魔法星花，`const.py`）
 - **液态荡漾输入框**：全局 textarea/input 玻璃磨砂效果（无 backdrop-filter）；`.input-wrap` 三处主输入框加流光渐变边框 + 液态荡漾高光动画；亮/暗主题 + 触摸设备适配（touch 设备禁用重型动画）
+
+### v2.5 新增功能
+
+- **自动化管理 Tab（📋 管理）**：列出全部自动化，支持批量勾选；批量操作栏含「全选/全不选/备份选中(N)/删除选中(N)」；不可访问条目禁用勾选；批量删除后自动 reload；后端新增 `ws_batch_delete_automations`（逗号分隔ID规避WS数组兼容）和 `ws_backup_selected`（生成子集备份文件）
+- **备份恢复双模式**：备份管理卡顶部增加模式切换按钮；**增量**（跳过已有同名自动化）/ **覆盖**（已有则 update，否则 create）；模式持久到 `_restoreMode` 状态，确认弹窗显示当前模式；后端 `run_restore_backup` 新增 `restore_mode` 参数，覆盖模式通过 alias 匹配现有 id 执行 `update_automation`
+- **主题按钮三态区分**：`🖥️ 自动`（半透明边框）/ `🌙 暗色`（紫色背景+边框）/ `☀️ 亮色`（金色背景+边框）；按钮同步显示当前状态文字标签
 
 ### macOS 退格键 / 方向键异常
 

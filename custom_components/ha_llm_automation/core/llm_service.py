@@ -922,33 +922,105 @@ async def run_restore_backup(
     config_entry: ConfigEntry,
     backup_path: str,
     log_callback: LogCallback,
+    restore_mode: str = "incremental",
 ) -> bool:
-    """从备份恢复所有自动化"""
+    """
+    从备份恢复自动化。
+    restore_mode:
+      "incremental" — 增量：已有同名（alias）的跳过，只新建不存在的
+      "overwrite"   — 覆盖：已有同名的执行更新，不存在的新建
+    """
     bridge = _get_bridge(hass, config_entry)
     mgr = _get_backup_manager(hass)
 
     log_callback(f"读取备份：{backup_path}")
     automations = mgr.restore_backup(backup_path)
-    log_callback(f"备份包含 {len(automations)} 条自动化，开始恢复...")
+    mode_label = "覆盖模式" if restore_mode == "overwrite" else "增量模式"
+    log_callback(f"备份包含 {len(automations)} 条自动化，{mode_label}，开始恢复...")
+
+    # 获取当前 HA 中已有自动化（用于增量/覆盖判断）
+    existing = await bridge.list_automations()
+    existing_alias_to_id: dict[str, str] = {
+        a["alias"]: a["id"] for a in existing if a.get("alias") and a.get("id")
+    }
 
     success, failed, skipped = 0, 0, 0
     for a in automations:
-        # 跳过配置为空的条目（YAML 型自动化备份时只含状态信息，无 triggers/actions）
+        alias = a.get("alias", "?")
+        # 跳过配置为空的条目（YAML 型自动化）
         if not any(k in a for k in ("triggers", "trigger", "actions", "action")):
             skipped += 1
-            log_callback(f"  跳过（{a.get('alias', '?')}）：配置为空，可能是 YAML 型自动化")
+            log_callback(f"  跳过（{alias}）：配置为空，可能是 YAML 型自动化")
             continue
         try:
             cfg = normalize_automation(a)
-            await bridge.create_automation(cfg)
+            if restore_mode == "incremental":
+                if alias in existing_alias_to_id:
+                    skipped += 1
+                    log_callback(f"  跳过（{alias}）：已存在")
+                    continue
+                await bridge.create_automation(cfg)
+                log_callback(f"  新建（{alias}）")
+            else:  # overwrite
+                if alias in existing_alias_to_id:
+                    await bridge.update_automation(existing_alias_to_id[alias], cfg)
+                    log_callback(f"  更新（{alias}）")
+                else:
+                    await bridge.create_automation(cfg)
+                    log_callback(f"  新建（{alias}）")
             success += 1
         except Exception as e:
             failed += 1
-            log_callback(f"  恢复失败（{a.get('alias', '?')}）：{e}")
+            log_callback(f"  失败（{alias}）：{e}")
 
     await bridge.reload_automations()
-    log_callback(f"恢复完成：{success} 成功，{failed} 失败，{skipped} 跳过（空配置）")
+    log_callback(f"恢复完成：{success} 成功，{failed} 失败，{skipped} 跳过")
     return failed == 0
+
+
+async def run_batch_delete_automations(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    automation_ids: list[str],
+    log_callback: LogCallback,
+) -> dict:
+    """批量删除指定 ID 的自动化"""
+    bridge = _get_bridge(hass, config_entry)
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for aid in automation_ids:
+        try:
+            await bridge.delete_automation(aid)
+            deleted.append(aid)
+            log_callback(f"  已删除 {aid}")
+        except Exception as e:
+            failed.append({"id": aid, "error": str(e)})
+            log_callback(f"  删除失败 {aid}：{e}")
+    if deleted:
+        await bridge.reload_automations()
+    log_callback(f"批量删除完成：{len(deleted)} 成功，{len(failed)} 失败")
+    return {"deleted": deleted, "failed": failed}
+
+
+async def run_backup_selected(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    automation_ids: list[str],
+) -> dict:
+    """备份选中的自动化（生成子集备份文件）"""
+    bridge = _get_bridge(hass, config_entry)
+    mgr = _get_backup_manager(hass)
+    full_configs: list[dict] = []
+    for aid in automation_ids:
+        try:
+            cfg = await bridge.get_automation_config(aid)
+            full_configs.append(cfg)
+        except Exception:
+            pass  # 跳过不可访问
+    if not full_configs:
+        raise RuntimeError("没有可备份的自动化（所选条目均不可访问）")
+    path = mgr.create_backup(full_configs)
+    return {"path": str(path), "name": path.name, "count": len(full_configs)}
 
 
 # ==================================================================

@@ -166,6 +166,8 @@ def _register_websocket_commands(hass: HomeAssistant) -> None:
         ws_clear_backups,
         ws_preview_doc,
         ws_delete_inaccessible_automations,
+        ws_batch_delete_automations,
+        ws_backup_selected,
     ]
     for cmd in cmds:
         websocket_api.async_register_command(hass, cmd)
@@ -757,19 +759,69 @@ async def ws_list_backups(hass, connection, msg):
     vol.Required("type"): f"{DOMAIN}/restore_backup",
     vol.Required("backup_path"): str,
     vol.Required("session_id"): str,
+    vol.Optional("restore_mode"): str,  # "incremental"（默认）| "overwrite"
 })
 @websocket_api.async_response
 async def ws_restore_backup(hass, connection, msg):
-    """恢复备份"""
+    """恢复备份（支持增量/覆盖两种模式）"""
     entry = _get_entry(hass)
     if entry is None:
         connection.send_error(msg["id"], "not_configured", "尚未配置")
         return
     from .core import llm_service
     log_cb = _make_log_cb(hass, msg["session_id"])
+    restore_mode = msg.get("restore_mode", "incremental")
     try:
-        ok = await llm_service.run_restore_backup(hass, entry, msg["backup_path"], log_cb)
+        ok = await llm_service.run_restore_backup(hass, entry, msg["backup_path"], log_cb, restore_mode)
         connection.send_result(msg["id"], {"ok": ok})
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/batch_delete_automations",
+    vol.Required("automation_ids_csv"): str,  # 逗号分隔，规避 HA WS 框架数组兼容问题
+    vol.Required("session_id"): str,
+})
+@websocket_api.async_response
+async def ws_batch_delete_automations(hass, connection, msg):
+    """批量删除自动化"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    automation_ids = [i.strip() for i in msg["automation_ids_csv"].split(",") if i.strip()]
+    if not automation_ids:
+        connection.send_error(msg["id"], "invalid", "automation_ids_csv 为空")
+        return
+    from .core import llm_service
+    log_cb = _make_log_cb(hass, msg["session_id"])
+    try:
+        result = await llm_service.run_batch_delete_automations(hass, entry, automation_ids, log_cb)
+        connection.send_result(msg["id"], result)
+    except Exception as e:
+        connection.send_error(msg["id"], "error", str(e))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/backup_selected",
+    vol.Required("automation_ids_csv"): str,  # 逗号分隔
+})
+@websocket_api.async_response
+async def ws_backup_selected(hass, connection, msg):
+    """备份选中的自动化（生成子集备份文件）"""
+    entry = _get_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_configured", "尚未配置")
+        return
+    automation_ids = [i.strip() for i in msg["automation_ids_csv"].split(",") if i.strip()]
+    if not automation_ids:
+        connection.send_error(msg["id"], "invalid", "automation_ids_csv 为空")
+        return
+    from .core import llm_service
+    try:
+        result = await llm_service.run_backup_selected(hass, entry, automation_ids)
+        connection.send_result(msg["id"], result)
     except Exception as e:
         connection.send_error(msg["id"], "error", str(e))
 

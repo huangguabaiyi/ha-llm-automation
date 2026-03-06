@@ -640,6 +640,12 @@ const STYLES = `
   }
   .icon-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); }
   .abort-btn { color: #f87171; }
+  /* 主题切换按钮三态 */
+  .theme-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; padding: 4px 9px; border-radius: 6px; border: 1px solid transparent; }
+  .theme-label { font-size: 11px; font-weight: 500; letter-spacing: 0; opacity: 1; }
+  .theme-auto  { border-color: rgba(255,255,255,0.22); }
+  .theme-dark  { background: rgba(99,102,241,0.22); border-color: rgba(99,102,241,0.55); }
+  .theme-light { background: rgba(251,191,36,0.2);  border-color: rgba(251,191,36,0.6); }
   .hint-text { font-size: 12px; color: var(--secondary-text-color, #9ca3af); margin: 4px 0 8px; }
   .consolidate-select-panel { padding: 12px; }
   .panel-label { font-size: 13px; color: var(--secondary-text-color, #9ca3af); margin-bottom: 8px; }
@@ -724,6 +730,12 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._delInaccessibleRunning = false;
     this._consolidateExpandedYaml = {};
     this._consolidateSelectedIds = null; // null=未初始化，Set=已选
+
+    // Manage tab state
+    this._manageChecked = new Set();
+
+    // Knowledge/Backup state: restore mode
+    this._restoreMode = "incremental"; // "incremental" | "overwrite"
 
     // Config state
     this._configData = {};
@@ -1419,12 +1431,13 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   async _restoreBackup(path) {
-    if (!confirm(`确认恢复此备份？\n${path}\n\n此操作将创建对应的自动化。`)) return;
+    const modeLabel = this._restoreMode === "overwrite" ? "覆盖（更新已有）" : "增量（跳过已有）";
+    if (!confirm(`确认以【${modeLabel}】模式恢复此备份？\n\n${path.split("/").pop()}`)) return;
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
     try {
-      await this._ws("restore_backup", { backup_path: path, session_id: sessionId });
+      await this._ws("restore_backup", { backup_path: path, session_id: sessionId, restore_mode: this._restoreMode });
       this._toast("恢复完成", "success");
     } catch (e) {
       this._log(`[ERROR] 恢复失败：${e.message || e}`);
@@ -2069,12 +2082,19 @@ class HaLlmAutomationPanel extends HTMLElement {
       </div>
 
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div class="card-title" style="margin:0">备份管理</div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-secondary btn-sm" id="btn-load-backups">刷新列表</button>
             <button class="btn btn-danger btn-sm" id="btn-clear-backups">🗑 清空全部</button>
           </div>
+        </div>
+        <!-- 恢复模式选择器 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;background:rgba(129,140,248,0.06);border-radius:8px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--secondary-text-color)">恢复模式：</span>
+          <button class="btn btn-sm ${this._restoreMode === 'incremental' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-incremental">增量（跳过已有）</button>
+          <button class="btn btn-sm ${this._restoreMode === 'overwrite' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-overwrite">覆盖（更新已有）</button>
+          <span style="font-size:11px;color:#6b7280">${this._restoreMode === 'incremental' ? '已有同名自动化将跳过' : '已有同名自动化将被覆盖更新'}</span>
         </div>
         ${this._backups.length === 0 ? `
           <div style="color:#6b7280;text-align:center;padding:20px;font-size:13px">暂无备份记录</div>
@@ -2117,6 +2137,108 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
+  // Manage tab
+  // ------------------------------------------------------------------
+
+  _renderManage() {
+    if (this._automationsLoading) {
+      return `<div class="card" style="text-align:center;padding:24px"><span class="spinner"></span> 加载中...</div>`;
+    }
+    if (this._automations === null) {
+      return `<div class="card"><div style="text-align:center;padding:20px">
+        <div style="color:#9ca3af;margin-bottom:12px">自动化列表未加载</div>
+        <button class="btn btn-primary" id="btn-manage-reload">🔄 加载列表</button>
+      </div></div>`;
+    }
+    const list = (this._automations || []).filter(a => a.id && a.id !== "new");
+    const checkedIds = list.filter(a => this._manageChecked.has(a.id) && a.accessible !== false);
+    const checkedCount = checkedIds.length;
+    return `
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div class="card-title" style="margin:0">自动化管理
+            <span style="font-weight:400;font-size:13px;color:#9ca3af"> ${list.length} 条</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-manage-reload">🔄 刷新列表</button>
+        </div>
+        ${list.length === 0 ? `<div style="color:#6b7280;text-align:center;padding:20px">暂无自动化</div>` : `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 10px;background:rgba(129,140,248,0.07);border-radius:8px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-all">全选</button>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-none">全不选</button>
+            <span style="flex:1;font-size:12px;color:#9ca3af">已选 ${checkedCount} 条</span>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-backup" ${checkedCount === 0 ? 'disabled' : ''}>💾 备份选中(${checkedCount})</button>
+            <button class="btn btn-danger btn-sm" id="btn-manage-delete" ${checkedCount === 0 ? 'disabled' : ''}>🗑 删除选中(${checkedCount})</button>
+          </div>
+          <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px">
+            ${list.map(a => {
+              const inaccessible = a.accessible === false;
+              const checked = this._manageChecked.has(a.id) && !inaccessible;
+              return `<li style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;
+                background:${inaccessible ? 'rgba(239,68,68,0.05)' : 'rgba(129,140,248,0.04)'};
+                border:1px solid ${inaccessible ? 'rgba(239,68,68,0.15)' : 'var(--divider-color,rgba(255,255,255,0.06))'}">
+                <input type="checkbox" id="manage-chk-${escHtml(a.id)}" ${checked ? 'checked' : ''} ${inaccessible ? 'disabled' : ''}
+                  style="accent-color:#818cf8;flex-shrink:0;width:15px;height:15px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.alias || a.id)}</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:1px">${escHtml(a.id)} · ${escHtml(a.mode || "single")}${inaccessible ? ' · <span style="color:#f87171">不可访问</span>' : ''}</div>
+                </div>
+              </li>`;
+            }).join("")}
+          </ul>
+        `}
+      </div>
+    `;
+  }
+
+  async _manageBackup() {
+    const ids = (this._automations || [])
+      .filter(a => this._manageChecked.has(a.id) && a.accessible !== false)
+      .map(a => a.id);
+    if (ids.length === 0) return;
+    if (!confirm(`备份选中的 ${ids.length} 条自动化？`)) return;
+    try {
+      const r = await this._ws("backup_selected", { automation_ids_csv: ids.join(",") });
+      this._toast(`已备份 ${r.count} 条 → ${r.name}`, "success");
+    } catch (e) {
+      this._toast(`备份失败：${e.message || e}`, "error");
+    }
+  }
+
+  async _manageDelete() {
+    const ids = (this._automations || [])
+      .filter(a => this._manageChecked.has(a.id) && a.accessible !== false)
+      .map(a => a.id);
+    if (ids.length === 0) return;
+    if (!confirm(`确定删除选中的 ${ids.length} 条自动化？此操作不可撤销。`)) return;
+    const sessionId = await this._startSession();
+    this._loading = true;
+    this._render();
+    try {
+      const r = await this._ws("batch_delete_automations", {
+        automation_ids_csv: ids.join(","),
+        session_id: sessionId,
+      });
+      const deleted = r.deleted || [];
+      const failed = r.failed || [];
+      this._log(`[INFO] 批量删除：成功 ${deleted.length} 条，失败 ${failed.length} 条`);
+      failed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id}：${f.error}`));
+      if (failed.length > 0) {
+        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败（见日志）`, "error");
+      } else {
+        this._toast(`已删除 ${deleted.length} 条`, "success");
+      }
+      this._manageChecked.clear();
+      await this._loadAutomations();
+    } catch (e) {
+      this._log(`[ERROR] 批量删除失败：${e.message || e}`);
+      this._toast(`删除失败：${e.message || e}`, "error");
+    } finally {
+      this._loading = false;
+      this._render();
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Main render
   // ------------------------------------------------------------------
 
@@ -2125,6 +2247,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       { id: "create", label: "✨ 创建" },
       { id: "optimize", label: "🔧 优化" },
       { id: "consolidate", label: "🔗 聚合" },
+      { id: "manage", label: "📋 管理" },
       { id: "config", label: "⚙ 配置" },
       { id: "knowledge", label: "📚 知识库/备份" },
     ];
@@ -2133,8 +2256,15 @@ class HaLlmAutomationPanel extends HTMLElement {
     if (this._tab === "create") mainContent = this._renderCreate();
     else if (this._tab === "optimize") mainContent = this._renderOptimize();
     else if (this._tab === "consolidate") mainContent = this._renderConsolidate();
+    else if (this._tab === "manage") mainContent = this._renderManage();
     else if (this._tab === "config") mainContent = this._renderConfig();
     else if (this._tab === "knowledge") mainContent = this._renderKnowledge();
+
+    // 主题按钮三态
+    const _themeAttr = this.getAttribute("data-theme");
+    const _themeIcon  = _themeAttr === "dark" ? "🌙" : _themeAttr === "light" ? "☀️" : "🖥️";
+    const _themeLabel = _themeAttr === "dark" ? "暗色" : _themeAttr === "light" ? "亮色" : "自动";
+    const _themeCls   = _themeAttr === "dark" ? "theme-dark" : _themeAttr === "light" ? "theme-light" : "theme-auto";
 
     // 保存滚动位置，防止 innerHTML 重写后归零
     const prevContent = this.shadowRoot.querySelector(".content");
@@ -2163,7 +2293,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         <h1>🤖 HA LLM Automation</h1>
         ${this._loading ? '<span class="spinner" style="color:#818cf8"></span>' : ""}
         ${this._loading ? '<button class="icon-btn abort-btn" id="btn-abort" title="终止当前操作">■</button>' : ""}
-        <button class="icon-btn" id="btn-toggle-theme" title="切换主题">🌓</button>
+        <button class="icon-btn theme-btn ${_themeCls}" id="btn-toggle-theme" title="切换主题（当前：${_themeLabel}）">${_themeIcon}<span class="theme-label">${_themeLabel}</span></button>
       </div>
       <div class="tabs">
         ${tabs.map(t => `<div class="tab ${this._tab === t.id ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
@@ -2219,6 +2349,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         if (this._tab === "knowledge") this._loadBackups();
         if (this._tab === "optimize" && prevTab !== "optimize") this._loadAutomations();
         if (this._tab === "consolidate" && prevTab !== "consolidate") this._loadAutomations();
+        if (this._tab === "manage" && prevTab !== "manage") this._loadAutomations();
         if (this._tab === "config" && !this._configLoaded) {
           Promise.all([this._loadConfig(), this._loadAreas(), this._loadLabels(), this._loadIntegrations()])
             .then(() => this._render());
@@ -2533,9 +2664,47 @@ class HaLlmAutomationPanel extends HTMLElement {
     const btnClearBkp = $("btn-clear-backups");
     if (btnClearBkp) btnClearBkp.addEventListener("click", () => this._clearBackups());
 
+    // 恢复模式切换
+    const btnModeInc = $("btn-mode-incremental");
+    if (btnModeInc) btnModeInc.addEventListener("click", () => { this._restoreMode = "incremental"; this._render(); });
+    const btnModeOvr = $("btn-mode-overwrite");
+    if (btnModeOvr) btnModeOvr.addEventListener("click", () => { this._restoreMode = "overwrite"; this._render(); });
+
     this._backups.forEach((b, i) => {
       const btnRestore = $(`btn-restore-${i}`);
       if (btnRestore) btnRestore.addEventListener("click", () => this._restoreBackup(b.file));
+    });
+
+    // ==== Manage tab ====
+    const btnManageReload = $("btn-manage-reload");
+    if (btnManageReload) btnManageReload.addEventListener("click", () => this._loadAutomations());
+
+    const btnManageSelAll = $("btn-manage-sel-all");
+    if (btnManageSelAll) btnManageSelAll.addEventListener("click", () => {
+      (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible !== false)
+        .forEach(a => this._manageChecked.add(a.id));
+      this._render();
+    });
+
+    const btnManageSelNone = $("btn-manage-sel-none");
+    if (btnManageSelNone) btnManageSelNone.addEventListener("click", () => {
+      this._manageChecked.clear();
+      this._render();
+    });
+
+    const btnManageBackup = $("btn-manage-backup");
+    if (btnManageBackup) btnManageBackup.addEventListener("click", () => this._manageBackup());
+
+    const btnManageDelete = $("btn-manage-delete");
+    if (btnManageDelete) btnManageDelete.addEventListener("click", () => this._manageDelete());
+
+    (this._automations || []).filter(a => a.id && a.id !== "new").forEach(a => {
+      const chk = $(`manage-chk-${a.id}`);
+      if (chk) chk.addEventListener("change", () => {
+        if (chk.checked) this._manageChecked.add(a.id);
+        else this._manageChecked.delete(a.id);
+        this._render();
+      });
     });
 
     // Doc preview buttons
