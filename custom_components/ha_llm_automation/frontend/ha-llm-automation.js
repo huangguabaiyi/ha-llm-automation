@@ -272,12 +272,26 @@ const STYLES = `
     70%  { height: 75%; opacity: 0.4; }
     100% { height: 100%; opacity: 0; transform: scaleY(1.1); }
   }
-  /* 触摸设备（手机/平板）：禁用会触发 GPU 合成层重绘的动画，防止键盘弹出时自动收起 */
+  /* 触摸设备（手机/平板）：禁用会触发 GPU 合成层重绘的动画/过渡/阴影，防止键盘弹出时自动收起 */
   @media (hover: none) and (pointer: coarse) {
     .input-wrap::before { animation: none; }
     .input-wrap::after { will-change: auto; }
     .input-wrap:focus-within::after { animation: none; }
     .input-wrap:focus-within::before { opacity: 0.6; }
+    /* 彻底禁用 focus 时的 transition / box-shadow / background 变化，
+       防止切 Tab 后 DOM 重建、键盘弹出期间任何 GPU 合成层变动触发收起 */
+    textarea, input[type=text], input[type=password], input[type=number], select {
+      transition: none !important;
+    }
+    textarea:focus, input:focus, select:focus {
+      box-shadow: none !important;
+    }
+    .input-wrap:focus-within {
+      box-shadow: none !important;
+    }
+    .input-wrap textarea:focus {
+      box-shadow: none !important;
+    }
   }
   .btn {
     display: inline-flex;
@@ -872,14 +886,18 @@ class HaLlmAutomationPanel extends HTMLElement {
       const r = await this._ws("delete_inaccessible_automations");
       const deleted = r.deleted || [];
       const failed = r.failed || [];
+      const scanned = r.scanned ?? "?";
+      this._log(`[INFO] 清除不可访问：扫描 ${scanned} 条，删除成功 ${deleted.length} 条，失败 ${failed.length} 条`);
       if (failed.length > 0) {
-        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条删除失败`, "error");
+        failed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id}：${f.error}`));
+        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败（见日志）`, "error");
       } else {
         this._toast(`已删除 ${deleted.length} 条不可访问的自动化`, "success");
       }
       await this._loadAutomations();
     } catch (e) {
       const msg = e?.message || e?.code || String(e);
+      this._log(`[ERROR] 清除不可访问失败：${msg}`);
       this._toast(`清除失败：${msg}`, "error");
     } finally {
       this._delInaccessibleRunning = false;

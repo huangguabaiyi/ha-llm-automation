@@ -314,16 +314,24 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
     bridge: HABridge = hass.data[DOMAIN][entry.entry_id]["bridge"]
     try:
         automations = await bridge.list_automations()
+        _LOGGER.info("delete_inaccessible: 共扫描到 %d 条自动化", len(automations))
         # 探测不可访问的自动化（GET失败 = YAML型）
         inaccessible_ids = []
         for a in automations:
             aid = a.get("id", "")
+            alias = a.get("alias", aid)
             if not aid or aid == "new":
+                _LOGGER.debug("delete_inaccessible: 跳过 id=%r alias=%r", aid, alias)
                 continue
             try:
                 await bridge.get_automation_config(aid)
-            except Exception:
+            except Exception as e:
+                _LOGGER.warning(
+                    "delete_inaccessible: GET config 失败 id=%s alias=%r → 标记为不可访问 | 原因: %s",
+                    aid, alias, e,
+                )
                 inaccessible_ids.append(aid)
+        _LOGGER.info("delete_inaccessible: 发现 %d 条不可访问自动化，准备删除", len(inaccessible_ids))
         # 删除
         deleted = []
         failed = []
@@ -331,12 +339,22 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
             try:
                 await bridge.delete_automation(aid)
                 deleted.append({"id": aid})
+                _LOGGER.info("delete_inaccessible: 已删除 id=%s", aid)
             except Exception as e:
-                failed.append({"id": aid, "error": str(e)})
+                err_str = str(e)
+                failed.append({"id": aid, "error": err_str})
+                _LOGGER.error(
+                    "delete_inaccessible: 删除失败 id=%s | 原因: %s",
+                    aid, err_str,
+                )
         if deleted:
             await bridge.reload_automations()
+            _LOGGER.info("delete_inaccessible: reload 完成，成功删除 %d 条，失败 %d 条", len(deleted), len(failed))
+        else:
+            _LOGGER.info("delete_inaccessible: 无自动化被删除，失败 %d 条", len(failed))
         connection.send_result(msg["id"], {"deleted": deleted, "failed": failed, "scanned": len(automations)})
     except Exception as e:
+        _LOGGER.exception("delete_inaccessible: 意外错误: %s", e)
         connection.send_error(msg["id"], "error", str(e))
 
 
