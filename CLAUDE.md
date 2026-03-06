@@ -486,7 +486,7 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
-- [ ] 清除不可访问自动化：已实现两级清除策略（见下）；待实测幽灵实体清除是否生效
+- [x] 清除不可访问自动化：两级清除策略已实测验证（幽灵实体通过注册表移除成功清除）
 - [ ] HACS 卡片图标：需推送至 GitHub + 通过 HACS 安装才可生效；本地部署阶段无法展示
 
 ### v2.2 已修复
