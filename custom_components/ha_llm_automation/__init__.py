@@ -316,7 +316,7 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
         automations = await bridge.list_automations()
         _LOGGER.info("delete_inaccessible: 共扫描到 %d 条自动化", len(automations))
         # 探测不可访问的自动化（GET失败 = YAML型）
-        inaccessible = []  # list of {"id": ..., "alias": ...}
+        inaccessible = []  # list of {"id": ..., "alias": ..., "entity_id": ...}
         for a in automations:
             aid = a.get("id", "")
             alias = a.get("alias", aid)
@@ -330,37 +330,61 @@ async def ws_delete_inaccessible_automations(hass, connection, msg):
                     "delete_inaccessible: GET config 失败 id=%s alias=%r → 标记为不可访问 | 原因: %s",
                     aid, alias, e,
                 )
-                inaccessible.append({"id": aid, "alias": alias})
+                inaccessible.append({"id": aid, "alias": alias, "entity_id": a.get("entity_id", "")})
         _LOGGER.info("delete_inaccessible: 发现 %d 条不可访问自动化，准备删除", len(inaccessible))
         # 删除
         deleted = []
         failed = []
         for item in inaccessible:
-            aid, alias = item["id"], item["alias"]
+            aid, alias, entity_id = item["id"], item["alias"], item["entity_id"]
             try:
                 await bridge.delete_automation(aid)
                 deleted.append({"id": aid, "alias": alias})
                 _LOGGER.info("delete_inaccessible: 已删除 id=%s alias=%r", aid, alias)
             except Exception as e:
                 err_str = str(e)
-                # "Resource not found" 是 YAML 型自动化的预期失败——DELETE API 无法操作 YAML 型
-                # 需在 automations.yaml 中手动删除
-                is_yaml_type = "resource not found" in err_str.lower() or "not found" in err_str.lower()
-                if is_yaml_type:
+                is_not_found = "resource not found" in err_str.lower() or "not found" in err_str.lower()
+                if is_not_found and entity_id:
+                    # DELETE API 找不到此条目——可能是幽灵实体（曾经存在，现已从配置移除，但仍留在实体注册表）
+                    # 尝试直接从实体注册表移除，彻底清除幽灵
+                    try:
+                        from homeassistant.helpers import entity_registry as er
+                        reg = er.async_get(hass)
+                        if reg.async_get(entity_id):
+                            reg.async_remove(entity_id)
+                            deleted.append({"id": aid, "alias": alias, "ghost": True})
+                            _LOGGER.info(
+                                "delete_inaccessible: 幽灵实体已从注册表清除 entity_id=%s alias=%r",
+                                entity_id, alias,
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "delete_inaccessible: entity_id=%s 不在注册表中，跳过 alias=%r",
+                                entity_id, alias,
+                            )
+                            failed.append({"id": aid, "alias": alias, "error": err_str, "yaml_type": True})
+                    except Exception as re:
+                        _LOGGER.error(
+                            "delete_inaccessible: 注册表移除失败 entity_id=%s alias=%r | 原因: %s",
+                            entity_id, alias, re,
+                        )
+                        failed.append({"id": aid, "alias": alias, "error": str(re), "yaml_type": True})
+                elif is_not_found:
+                    # 没有 entity_id，无法走注册表路径，只能提示手动处理
                     _LOGGER.warning(
-                        "delete_inaccessible: YAML型自动化无法通过API删除 id=%s alias=%r"
-                        " → 请在 automations.yaml 中手动删除该条目 | HA返回: %s",
+                        "delete_inaccessible: id=%s alias=%r 无 entity_id，无法清除 | HA返回: %s",
                         aid, alias, err_str,
                     )
+                    failed.append({"id": aid, "alias": alias, "error": err_str, "yaml_type": True})
                 else:
                     _LOGGER.error(
                         "delete_inaccessible: 删除失败 id=%s alias=%r | 原因: %s",
                         aid, alias, err_str,
                     )
-                failed.append({"id": aid, "alias": alias, "error": err_str, "yaml_type": is_yaml_type})
+                    failed.append({"id": aid, "alias": alias, "error": err_str, "yaml_type": False})
         if deleted:
             await bridge.reload_automations()
-            _LOGGER.info("delete_inaccessible: reload 完成，成功删除 %d 条，失败 %d 条", len(deleted), len(failed))
+            _LOGGER.info("delete_inaccessible: reload 完成，成功 %d 条（含幽灵清除），失败 %d 条", len(deleted), len(failed))
         else:
             _LOGGER.info("delete_inaccessible: 无自动化被删除，失败 %d 条", len(failed))
         connection.send_result(msg["id"], {"deleted": deleted, "failed": failed, "scanned": len(automations)})

@@ -486,7 +486,7 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] YAML 型自动化（`restored=true, state=unavailable`）无法通过 GET 获取完整配置；optimize/consolidate 已自动过滤
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
-- [ ] 清除不可访问自动化（YAML 型）：DELETE `/api/config/automation/config/{id}` 对 YAML 型返回 400 "Resource not found"（已确认）——**YAML 型自动化只能手动编辑 `automations.yaml` 删除**；前端已区分 YAML 型失败（warn 橙色提示+列出 alias）与真正错误（red error）
+- [ ] 清除不可访问自动化：已实现两级清除策略（见下）；待实测幽灵实体清除是否生效
 - [ ] HACS 卡片图标：需推送至 GitHub + 通过 HACS 安装才可生效；本地部署阶段无法展示
 
 ### v2.2 已修复
@@ -522,7 +522,7 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 ### v2.4 已修复 / 新增
 
 - **备份内容完整性（Critical 修复）**：备份前改为逐条调用 `GET /api/config/automation/config/{id}` 获取完整配置（含 triggers/actions）；三处备份调用（create/optimize/consolidate）统一使用 `_get_full_automations_for_backup()` helper，跳过 YAML 型
-- **清除不可访问自动化**：聚合 Tab 新增「🗑 清除不可访问（N 条）」红色按钮；后端 `ws_delete_inaccessible_automations` 后端自动探测（list → 逐GET → 失败则DELETE → reload），**不依赖前端传 ID**（规避 HA 2026.x WS 框架数组参数兼容性问题）；`delete_automation` 失败时捕获 HA 响应体抛出详细错误；**v2.4.1 日志完善**：全流程加 `_LOGGER`（INFO/WARNING/ERROR/exception），前端失败详情逐条打到日志面板
+- **清除不可访问自动化**：聚合 Tab 新增「🗑 清除不可访问（N 条）」红色按钮；后端 `ws_delete_inaccessible_automations` 后端自动探测（list → 逐GET → 失败则DELETE → reload），**不依赖前端传 ID**（规避 HA 2026.x WS 框架数组参数兼容性问题）；全流程加 `_LOGGER`，前端失败详情逐条打到日志面板。**两级清除策略**：① DELETE API 成功 → 正常删除；② DELETE 返回 "Resource not found" → 尝试 `entity_registry.async_remove(entity_id)` 清除幽灵实体；③ 注册表也失败 → 提示手动编辑 `automations.yaml`；前端区分三种结果（`[OK]`幽灵清除 / `[WARN]`需手动 / `[ERROR]`真实失败）
 - **HA WS 数组参数兼容性坑（Critical）**：HA 2026.x WS 框架对 `list` 类型参数有序列化兼容问题；`vol.Required`→Required key error；`vol.Optional(default=[])`→默认值被用参数始终为空。**原则：WS 命令避免接收数组，改为后端自行处理**
 - **移动端键盘收起修复（v2.4.1 深化）**：① 删除 `textarea` 的 `backdrop-filter: blur(6px)` GPU合成层；② `@media (hover:none) and (pointer:coarse)` 禁用 `.input-wrap` 两个伪元素动画 + 清除 `will-change`；③ **切 Tab 后首次 focus 仍收起根因**：`_render()` 重建 DOM 后第一次 focus 触发 `transition`/`box-shadow` 变化 → GPU 合成层与键盘弹出 viewport 缩小同时发生 → WebKit 收起键盘；修复：touch 设备再追加 `transition: none !important` + `box-shadow: none !important`（textarea/input/:focus/.input-wrap:focus-within）
 - **HACS 图标**：`custom_components/ha_llm_automation/icon.png`（256×256 RGBA）；HACS 卡片图标需 GitHub 仓库才生效，本地阶段 icon.png 已就位

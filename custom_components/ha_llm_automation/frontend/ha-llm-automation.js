@@ -888,22 +888,26 @@ class HaLlmAutomationPanel extends HTMLElement {
       const deleted = r.deleted || [];
       const failed = r.failed || [];
       const scanned = r.scanned ?? "?";
-      this._log(`[INFO] 清除不可访问：扫描 ${scanned} 条，删除成功 ${deleted.length} 条，失败 ${failed.length} 条`);
+      const ghostDeleted = deleted.filter(d => d.ghost);
+      const normalDeleted = deleted.filter(d => !d.ghost);
       const yamlFailed = failed.filter(f => f.yaml_type);
       const realFailed = failed.filter(f => !f.yaml_type);
+      this._log(`[INFO] 清除不可访问：扫描 ${scanned} 条，API删除 ${normalDeleted.length} 条，注册表清除 ${ghostDeleted.length} 条，失败 ${failed.length} 条`);
+      // 幽灵实体（从注册表清除）
+      ghostDeleted.forEach(d => this._log(`[OK] 幽灵实体已清除：${d.alias || d.id}`));
       // YAML 型：API 无法删除，提示手动操作
       if (yamlFailed.length > 0) {
-        this._log(`[WARN] ${yamlFailed.length} 条 YAML 型自动化无法通过 API 删除，需在 automations.yaml 中手动删除：`);
+        this._log(`[WARN] ${yamlFailed.length} 条无法自动删除，需在 automations.yaml 中手动删除：`);
         yamlFailed.forEach(f => this._log(`  • ${f.alias || f.id}`));
       }
       // 真正的错误
       realFailed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id} ${f.alias ? `(${f.alias})` : ""}：${f.error}`));
       if (realFailed.length > 0) {
-        this._toast(`已删除 ${deleted.length} 条，${realFailed.length} 条异常失败（见日志）`, "error");
+        this._toast(`清除完成，${realFailed.length} 条异常失败（见日志）`, "error");
       } else if (yamlFailed.length > 0) {
-        this._toast(`已删除 ${deleted.length} 条；${yamlFailed.length} 条 YAML 型需手动删除（见日志）`, "warn");
+        this._toast(`已清除 ${deleted.length} 条；${yamlFailed.length} 条需手动删除（见日志）`, "warn");
       } else {
-        this._toast(`已删除 ${deleted.length} 条不可访问的自动化`, "success");
+        this._toast(`已清除 ${deleted.length} 条不可访问的自动化`, "success");
       }
       await this._loadAutomations();
     } catch (e) {
