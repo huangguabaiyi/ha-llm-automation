@@ -210,7 +210,12 @@ const STYLES = `
     will-change: height, opacity, transform;
   }
   .input-wrap:focus-within::before { opacity: 1; }
-  .input-wrap:focus-within { animation: inputBlinking 8s linear infinite; }
+  .input-wrap:focus-within {
+    box-shadow: 0 0 0 3px rgba(129,140,248,0.18), 0 6px 24px rgba(129,140,248,0.15);
+  }
+  :host([data-theme="light"]) .input-wrap:focus-within {
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15), 0 6px 24px rgba(99,102,241,0.10);
+  }
   .input-wrap:focus-within::after {
     animation: inputLiquidRipple 1.5s cubic-bezier(0.33, 1, 0.68, 1) forwards;
   }
@@ -695,6 +700,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._consolidateApproved = {};
     this._consolidateSkipped = new Set();
     this._consolidateRefineTexts = {};
+    this._delInaccessibleRunning = false;
     this._consolidateExpandedYaml = {};
     this._consolidateSelectedIds = null; // null=未初始化，Set=已选
 
@@ -853,22 +859,25 @@ class HaLlmAutomationPanel extends HTMLElement {
     const inaccessible = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible === false);
     if (inaccessible.length === 0) return;
     if (!confirm(`确定要删除全部 ${inaccessible.length} 条不可访问的 YAML 型自动化吗？此操作不可撤销。`)) return;
-    this._loading = true;
+    this._delInaccessibleRunning = true;
     this._render();
     try {
-      const r = await this._ws("delete_inaccessible_automations");
+      const r = await this._ws("delete_inaccessible_automations", {
+        automation_ids: inaccessible.map(a => a.id),
+      });
       const deleted = r.deleted || [];
       const failed = r.failed || [];
       if (failed.length > 0) {
-        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败`, "error");
+        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条删除失败`, "error");
       } else {
         this._toast(`已删除 ${deleted.length} 条不可访问的自动化`, "success");
       }
       await this._loadAutomations();
     } catch (e) {
-      this._toast(`删除失败：${e.message || e}`, "error");
+      const msg = e?.message || e?.code || String(e);
+      this._toast(`清除失败：${msg}`, "error");
     } finally {
-      this._loading = false;
+      this._delInaccessibleRunning = false;
       this._render();
     }
   }
@@ -1712,8 +1721,10 @@ class HaLlmAutomationPanel extends HTMLElement {
               ${inaccessibleCount > 0 ? `
               <button class="btn btn-secondary btn-sm" id="btn-cons-del-inaccessible"
                 style="color:#f87171;border-color:#f87171"
-                ${this._loading ? 'disabled' : ''}>
-                🗑 清除不可访问（${inaccessibleCount} 条）
+                ${this._loading || this._delInaccessibleRunning ? 'disabled' : ''}>
+                ${this._delInaccessibleRunning
+                  ? '<span class="spinner"></span> 清除中...'
+                  : `🗑 清除不可访问（${inaccessibleCount} 条）`}
               </button>` : ''}
               <button class="btn btn-primary" id="btn-cons-start-analyze"
                 ${this._loading || selectedAccessibleCount === 0 ? 'disabled' : ''}>
