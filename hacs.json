@@ -1,0 +1,7 @@
+{
+  "name": "HA LLM Automation",
+  "description": "Create, optimize and consolidate Home Assistant automations using LLM (GPT-4o, Claude, etc.) with natural language.",
+  "render_readme": true,
+  "homeassistant": "2024.2.0",
+  "content_in_root": false
+}

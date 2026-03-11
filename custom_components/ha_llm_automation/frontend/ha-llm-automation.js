@@ -6,6 +6,349 @@
 const DOMAIN = "ha_llm_automation";
 
 // ============================================================
+// i18n — Translations (zh / en)
+// Follows hass.language: zh-Hans/zh-Hant → zh, otherwise → en
+// ============================================================
+const TRANSLATIONS = {
+  zh: {
+    tab_create: "✨ 创建", tab_optimize: "🔧 优化",
+    tab_consolidate: "🔗 聚合", tab_manage: "📋 管理",
+    tab_config: "⚙ 配置", tab_knowledge: "📚 知识库/备份",
+    theme_auto: "自动", theme_dark: "暗色", theme_light: "亮色",
+    theme_toggle: "切换主题（当前：{label}）",
+    abort_title: "终止当前操作",
+    create_title: "描述自动化需求",
+    create_placeholder: "例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇",
+    create_btn: "▶ 生成自动化", create_btn_loading: "生成中...",
+    create_sel_all: "☑ 全选", create_sel_none: "☐ 全不选",
+    create_save_sel: "保存选中 ({n} 条)",
+    create_saving: "保存成功：{n} 条",
+    create_has_issues: "⚠ 有问题", create_ok: "✓ 正常",
+    create_refine_hide: "▲ 收起追问", create_refine_show: "✏ 追问修改",
+    create_refine_placeholder: "输入修改意见让 AI 重新生成...",
+    create_refine_btn: "重新生成",
+    create_no_yaml: "AI 未能生成有效的自动化配置",
+    create_expand_hint: "▼ 展开选择（{n} 个可选）",
+    opt_select_title: "选择要优化的自动化",
+    opt_refresh: "🔄 刷新列表",
+    opt_loading: "正在加载自动化列表...",
+    opt_load_fail: "加载失败，请点击"刷新列表"重试",
+    opt_empty: "暂无可优化的自动化（存储型）",
+    opt_placeholder: "— 请选择 —",
+    opt_analyze_btn: "分析意图 ▶", opt_analyze_loading: "分析中...",
+    opt_step1_title: "Step 1 — 分析报告",
+    opt_issues_title: "⚠ 发现的问题：", opt_sugg_title: "✦ 优化建议：",
+    opt_direction_label: "追问 / 追加方向（可选）",
+    opt_direction_placeholder: "可补充分析追问或优化方向，如：重点分析能否加夜间条件、补全其他区域设备...",
+    opt_reanalyze: "🔄 重新分析",
+    opt_generate_btn: "生成优化方案 ▶", opt_generate_loading: "生成中...",
+    opt_step2_title: "Step 2 — 优化结果",
+    opt_diff_side: "⇔ 左右对比", opt_diff_inline: "≡ 内联 diff",
+    opt_diff_before: "优化前", opt_diff_after: "优化后",
+    opt_diff_inline_label: "内联 diff（优化前 → 优化后）",
+    opt_refine_placeholder: "输入追问修改意见...",
+    opt_refine_btn: "重新生成",
+    opt_save_btn: "💾 保存优化结果",
+    cons_title: "批量整合自动化",
+    cons_refresh: "🔄 刷新列表",
+    cons_desc: "分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。",
+    cons_loading: "正在加载自动化列表...",
+    cons_load_fail: "加载失败，请点击"刷新列表"重试",
+    cons_empty: "暂无可整合的自动化（存储型）",
+    cons_select_label: "选择要参与整合的自动化（{sel}/{total} 已选）：",
+    cons_inaccessible: "⚠ 不可访问",
+    cons_sel_all: "☑ 全选", cons_sel_none: "☐ 全不选",
+    cons_del_btn: "🗑 清除不可访问（{n} 条）",
+    cons_deleting: "清除中...",
+    cons_analyze_btn: "▶ 开始分析（{n} 条）", cons_analyze_loading: "分析中...",
+    cons_plan_title: "聚合方案",
+    cons_summary: "合并 {merge} · 修复 {fix} · 无需修改 {ok}",
+    cons_batch_selected: "已勾选 {n} 项",
+    cons_batch_all: "☑ 全选", cons_batch_none: "☐ 全不选",
+    cons_batch_exec: "▶ 批量执行（{n} 项）",
+    cons_merge_tag: "合并", cons_fix_tag: "修复",
+    cons_scenario: "场景：{name}",
+    cons_originals: "原始自动化（共 {n} 条，将被合并替换）：",
+    cons_no_original: "（无法获取原始配置）",
+    cons_merged_label: "合并后：",
+    cons_refine_placeholder: "输入修改意见...",
+    cons_approve: "✓ 批准", cons_skip: "✗ 跳过",
+    cons_issue_prefix: "问题：{issue}",
+    cons_fix_before: "原始配置", cons_fix_after: "修复后",
+    cons_ok_items: "✓ {n} 条无需修改：{list}",
+    cons_exec_all: "⚡ 执行所有批准项 ({n})",
+    cons_refine_btn: "重新生成",
+    manage_loading: "加载中...",
+    manage_not_loaded: "自动化列表未加载",
+    manage_load_btn: "🔄 加载列表",
+    manage_title: "自动化管理",
+    manage_refresh: "🔄 刷新列表",
+    manage_empty: "暂无自动化",
+    manage_sel_all: "全选", manage_sel_none: "全不选",
+    manage_selected: "已选 {n} 条",
+    manage_backup_btn: "💾 备份选中({n})",
+    manage_delete_btn: "🗑 删除选中({n})",
+    manage_inaccessible: "不可访问",
+    config_title: "LLM 接口配置",
+    config_loading: "加载配置中...",
+    config_model: "模型名称",
+    config_filter_title: "实体筛选（可选）",
+    config_filter_note: "注：以下筛选仅影响发送给 LLM 的设备与实体列表，不影响自动化的分析范围。",
+    config_extra_domains: "额外可见域（逗号分隔，如 notify,remote）",
+    config_hidden_domains: "隐藏域（输入 domain + 回车）",
+    config_hidden_placeholder: "weather,person（逗号分隔）",
+    config_area_filter: "仅显示区域（选择后实体列表只含这些区域）",
+    config_integ_filter: "仅显示集成",
+    config_label_filter: "仅显示标签",
+    config_advanced: "高级选项",
+    config_log_prompt: "在日志中打印发给 LLM 的 Prompt 文本（紫色显示）",
+    config_use_docs: "在 Prompt 中注入 HA 官方文档（本地缓存，7 天后自动更新；关闭则完全跳过）",
+    config_save_btn: "💾 保存配置",
+    config_saving: "⏳ 保存中...",
+    config_base_url: "Base URL（openai_compatible 需填，如 https://api.xxx.com/v1）",
+    know_title: "知识库文档",
+    know_preview_btn: "预览",
+    know_truncated: "(已截断至 5000 字符)",
+    know_refresh_btn: "刷新文档缓存", know_refreshing: "刷新中...",
+    backup_title: "备份管理",
+    backup_refresh: "刷新列表",
+    backup_clear_all: "🗑 清空全部",
+    backup_mode_label: "恢复模式：",
+    backup_incremental: "增量（跳过已有）", backup_overwrite: "覆盖（更新已有）",
+    backup_incremental_hint: "已有同名自动化将跳过",
+    backup_overwrite_hint: "已有同名自动化将被覆盖更新",
+    backup_empty: "暂无备份记录",
+    backup_restore_btn: "恢复",
+    backup_meta: "{count} 条 · {size}KB",
+    log_title: "运行日志",
+    log_clear: "清空",
+    log_waiting: "等待操作...",
+    copy_btn: "复制",
+    confirm_del_inaccessible: "确定要清除全部 {n} 条不可访问的 YAML 型自动化吗？\n\n注意：YAML 型自动化无法通过 API 删除，需在 HA 的 automations.yaml 文件中手动删除对应条目。",
+    confirm_restore: "确认以【{mode}】模式恢复此备份？\n\n{file}",
+    confirm_clear_backups: "确认清空全部备份？不可恢复！",
+    confirm_backup_sel: "备份选中的 {n} 条自动化？",
+    confirm_del_sel: "确定删除选中的 {n} 条自动化？此操作不可撤销。",
+    confirm_no_approved: "没有批准的条目",
+    toast_config_saved: "配置已保存",
+    toast_optimize_saved: "优化保存成功",
+    toast_restore_done: "恢复完成",
+    toast_cleared_n: "已清除 {n} 条不可访问的自动化",
+    toast_backed_up: "已备份 {n} 条 → {file}",
+    toast_deleted_n: "已删除 {n} 条",
+    toast_copied: "已复制到剪贴板",
+    toast_docs_refreshed: "刷新完成：{keys}",
+    toast_no_sel: "没有选中的自动化可以保存",
+    toast_save_fail_yaml: "无法保存：YAML 校验失败",
+    toast_clear_partial_fail: "清除完成，{n} 条异常失败（见日志）",
+    toast_clear_yaml_warn: "已清除 {del} 条；{warn} 条需手动删除（见日志）",
+    toast_del_partial_fail: "已删除 {ok} 条，{fail} 条失败（见日志）",
+    toast_exec_done: "执行完成：{ok} 成功，{fail} 失败",
+    toast_backups_cleared: "已删除 {n} 个备份文件",
+    toast_save_fail: "保存失败：{msg}",
+    toast_clear_fail: "清除失败：{msg}",
+    toast_backup_fail: "备份失败：{msg}",
+    toast_del_fail: "删除失败：{msg}",
+    toast_restore_fail: "恢复失败：{msg}",
+    toast_refresh_fail: "刷新失败：{msg}",
+    toast_preview_fail: "预览失败：{msg}",
+    toast_clear_all_fail: "清空失败：{msg}",
+    toast_copy_fail: "复制失败（请手动选择复制）",
+    log_aborted: "[ERROR] 操作已被用户终止",
+    log_no_sel: "[ERROR] 请至少选择一条自动化",
+    log_analyze_done: "[OK] 分析完成",
+    log_analyze_fail: "[ERROR] 分析失败：{msg}",
+    log_generate_fail: "[ERROR] 生成失败：{msg}",
+    log_refine_fail: "[ERROR] 修改失败：{msg}",
+    log_save_fail: "[ERROR] 保存失败：{msg}",
+    log_exec_fail: "[ERROR] 执行失败：{msg}",
+    log_refresh_fail: "[ERROR] 刷新失败：{msg}",
+    log_del_inaccessible_summary: "[INFO] 清除不可访问：扫描 {scanned} 条，API删除 {api} 条，注册表清除 {ghost} 条，失败 {fail} 条",
+    log_ghost_cleared: "[OK] 幽灵实体已清除：{alias}",
+    log_yaml_manual: "[WARN] {n} 条无法自动删除，需在 automations.yaml 中手动删除：",
+    log_del_fail_id: "[ERROR] 删除失败 id={id} ({alias})：{error}",
+    log_del_inaccessible_fail: "[ERROR] 清除不可访问失败：{msg}",
+    log_batch_del_summary: "[INFO] 批量删除：成功 {ok} 条，失败 {fail} 条",
+    log_batch_del_fail_id: "[ERROR] 删除失败 id={id}：{error}",
+    log_batch_del_fail: "[ERROR] 批量删除失败：{msg}",
+    log_restore_fail: "[ERROR] 恢复失败：{msg}",
+  },
+  en: {
+    tab_create: "✨ Create", tab_optimize: "🔧 Optimize",
+    tab_consolidate: "🔗 Consolidate", tab_manage: "📋 Manage",
+    tab_config: "⚙ Config", tab_knowledge: "📚 Knowledge/Backup",
+    theme_auto: "Auto", theme_dark: "Dark", theme_light: "Light",
+    theme_toggle: "Toggle theme (current: {label})",
+    abort_title: "Abort current operation",
+    create_title: "Describe your automation",
+    create_placeholder: "e.g. Turn off all living room lights at 10 PM; Turn off AC and fan when nobody is home",
+    create_btn: "▶ Generate", create_btn_loading: "Generating...",
+    create_sel_all: "☑ Select All", create_sel_none: "☐ Deselect All",
+    create_save_sel: "Save Selected ({n})",
+    create_saving: "Saved: {n}",
+    create_has_issues: "⚠ Issues", create_ok: "✓ OK",
+    create_refine_hide: "▲ Hide Refine", create_refine_show: "✏ Refine",
+    create_refine_placeholder: "Enter feedback for AI to regenerate...",
+    create_refine_btn: "Regenerate",
+    create_no_yaml: "AI failed to generate valid automation config",
+    create_expand_hint: "▼ Expand ({n} available)",
+    opt_select_title: "Select automation to optimize",
+    opt_refresh: "🔄 Refresh",
+    opt_loading: "Loading automations...",
+    opt_load_fail: "Load failed, click \"Refresh\" to retry",
+    opt_empty: "No optimizable automations (storage type)",
+    opt_placeholder: "— Select —",
+    opt_analyze_btn: "Analyze ▶", opt_analyze_loading: "Analyzing...",
+    opt_step1_title: "Step 1 — Analysis Report",
+    opt_issues_title: "⚠ Issues found:", opt_sugg_title: "✦ Suggestions:",
+    opt_direction_label: "Follow-up / Additional direction (optional)",
+    opt_direction_placeholder: "e.g. Focus on adding nighttime conditions, extend to other rooms...",
+    opt_reanalyze: "🔄 Re-analyze",
+    opt_generate_btn: "Generate Optimized ▶", opt_generate_loading: "Generating...",
+    opt_step2_title: "Step 2 — Optimized Result",
+    opt_diff_side: "⇔ Side by side", opt_diff_inline: "≡ Inline diff",
+    opt_diff_before: "Before", opt_diff_after: "After",
+    opt_diff_inline_label: "Inline diff (Before → After)",
+    opt_refine_placeholder: "Enter refinement feedback...",
+    opt_refine_btn: "Regenerate",
+    opt_save_btn: "💾 Save Optimized",
+    cons_title: "Consolidate Automations",
+    cons_refresh: "🔄 Refresh",
+    cons_desc: "Analyze all automations, identify duplicates and issues, consolidate by scenario.",
+    cons_loading: "Loading automations...",
+    cons_load_fail: "Load failed, click \"Refresh\" to retry",
+    cons_empty: "No consolidatable automations (storage type)",
+    cons_select_label: "Select automations to consolidate ({sel}/{total} selected):",
+    cons_inaccessible: "⚠ Inaccessible",
+    cons_sel_all: "☑ Select All", cons_sel_none: "☐ Deselect All",
+    cons_del_btn: "🗑 Clear Inaccessible ({n})",
+    cons_deleting: "Clearing...",
+    cons_analyze_btn: "▶ Analyze ({n})", cons_analyze_loading: "Analyzing...",
+    cons_plan_title: "Consolidation Plan",
+    cons_summary: "Merge {merge} · Fix {fix} · Keep {ok}",
+    cons_batch_selected: "{n} selected",
+    cons_batch_all: "☑ Select All", cons_batch_none: "☐ Deselect All",
+    cons_batch_exec: "▶ Execute ({n})",
+    cons_merge_tag: "Merge", cons_fix_tag: "Fix",
+    cons_scenario: "Scenario: {name}",
+    cons_originals: "Original automations ({n} total, will be replaced):",
+    cons_no_original: "(Original config unavailable)",
+    cons_merged_label: "Merged:",
+    cons_refine_placeholder: "Enter feedback...",
+    cons_approve: "✓ Approve", cons_skip: "✗ Skip",
+    cons_issue_prefix: "Issue: {issue}",
+    cons_fix_before: "Original", cons_fix_after: "Fixed",
+    cons_ok_items: "✓ {n} unchanged: {list}",
+    cons_exec_all: "⚡ Execute All Approved ({n})",
+    cons_refine_btn: "Regenerate",
+    manage_loading: "Loading...",
+    manage_not_loaded: "Automations not loaded",
+    manage_load_btn: "🔄 Load List",
+    manage_title: "Automation Manager",
+    manage_refresh: "🔄 Refresh",
+    manage_empty: "No automations",
+    manage_sel_all: "Select All", manage_sel_none: "Deselect All",
+    manage_selected: "{n} selected",
+    manage_backup_btn: "💾 Backup ({n})",
+    manage_delete_btn: "🗑 Delete ({n})",
+    manage_inaccessible: "Inaccessible",
+    config_title: "LLM API Configuration",
+    config_loading: "Loading config...",
+    config_model: "Model name",
+    config_filter_title: "Entity Filters (optional)",
+    config_filter_note: "Note: Filters only affect the entity list sent to LLM, not the automation scope.",
+    config_extra_domains: "Extra visible domains (comma-separated, e.g. notify,remote)",
+    config_hidden_domains: "Hidden domains (type domain + enter)",
+    config_hidden_placeholder: "weather,person (comma-separated)",
+    config_area_filter: "Show only areas (entity list limited to selected areas)",
+    config_integ_filter: "Show only integration",
+    config_label_filter: "Show only labels",
+    config_advanced: "Advanced Options",
+    config_log_prompt: "Print LLM prompt in log panel (shown in purple)",
+    config_use_docs: "Inject HA official docs into prompt (locally cached, auto-updated every 7 days)",
+    config_save_btn: "💾 Save Config",
+    config_saving: "⏳ Saving...",
+    config_base_url: "Base URL (required for openai_compatible, e.g. https://api.xxx.com/v1)",
+    know_title: "Knowledge Docs",
+    know_preview_btn: "Preview",
+    know_truncated: "(truncated to 5000 chars)",
+    know_refresh_btn: "Refresh Doc Cache", know_refreshing: "Refreshing...",
+    backup_title: "Backup Manager",
+    backup_refresh: "Refresh",
+    backup_clear_all: "🗑 Clear All",
+    backup_mode_label: "Restore mode:",
+    backup_incremental: "Incremental (skip existing)", backup_overwrite: "Overwrite (update existing)",
+    backup_incremental_hint: "Existing automations with same name will be skipped",
+    backup_overwrite_hint: "Existing automations with same name will be overwritten",
+    backup_empty: "No backups",
+    backup_restore_btn: "Restore",
+    backup_meta: "{count} · {size} KB",
+    log_title: "Run Log",
+    log_clear: "Clear",
+    log_waiting: "Waiting for operation...",
+    copy_btn: "Copy",
+    confirm_del_inaccessible: "Clear all {n} inaccessible YAML automations?\n\nNote: YAML automations cannot be deleted via API; you must manually remove them from automations.yaml.",
+    confirm_restore: "Restore this backup in [{mode}] mode?\n\n{file}",
+    confirm_clear_backups: "Clear all backups? This cannot be undone!",
+    confirm_backup_sel: "Backup selected {n} automations?",
+    confirm_del_sel: "Delete selected {n} automations? This cannot be undone.",
+    confirm_no_approved: "No approved items",
+    toast_config_saved: "Config saved",
+    toast_optimize_saved: "Optimization saved",
+    toast_restore_done: "Restore complete",
+    toast_cleared_n: "Cleared {n} inaccessible automations",
+    toast_backed_up: "Backed up {n} → {file}",
+    toast_deleted_n: "Deleted {n}",
+    toast_copied: "Copied to clipboard",
+    toast_docs_refreshed: "Refreshed: {keys}",
+    toast_no_sel: "No automations selected",
+    toast_save_fail_yaml: "Cannot save: YAML validation failed",
+    toast_clear_partial_fail: "Clear done, {n} failed (see log)",
+    toast_clear_yaml_warn: "Cleared {del}; {warn} need manual deletion (see log)",
+    toast_del_partial_fail: "Deleted {ok}, {fail} failed (see log)",
+    toast_exec_done: "Done: {ok} succeeded, {fail} failed",
+    toast_backups_cleared: "Deleted {n} backup files",
+    toast_save_fail: "Save failed: {msg}",
+    toast_clear_fail: "Clear failed: {msg}",
+    toast_backup_fail: "Backup failed: {msg}",
+    toast_del_fail: "Delete failed: {msg}",
+    toast_restore_fail: "Restore failed: {msg}",
+    toast_refresh_fail: "Refresh failed: {msg}",
+    toast_preview_fail: "Preview failed: {msg}",
+    toast_clear_all_fail: "Clear all failed: {msg}",
+    toast_copy_fail: "Copy failed (please select and copy manually)",
+    log_aborted: "[ERROR] Operation aborted by user",
+    log_no_sel: "[ERROR] Please select at least one automation",
+    log_analyze_done: "[OK] Analysis complete",
+    log_analyze_fail: "[ERROR] Analysis failed: {msg}",
+    log_generate_fail: "[ERROR] Generation failed: {msg}",
+    log_refine_fail: "[ERROR] Refinement failed: {msg}",
+    log_save_fail: "[ERROR] Save failed: {msg}",
+    log_exec_fail: "[ERROR] Execution failed: {msg}",
+    log_refresh_fail: "[ERROR] Refresh failed: {msg}",
+    log_del_inaccessible_summary: "[INFO] Clear inaccessible: scanned {scanned}, API deleted {api}, registry cleared {ghost}, failed {fail}",
+    log_ghost_cleared: "[OK] Ghost entity cleared: {alias}",
+    log_yaml_manual: "[WARN] {n} cannot be auto-deleted, manually remove from automations.yaml:",
+    log_del_fail_id: "[ERROR] Delete failed id={id} ({alias}): {error}",
+    log_del_inaccessible_fail: "[ERROR] Clear inaccessible failed: {msg}",
+    log_batch_del_summary: "[INFO] Batch delete: {ok} succeeded, {fail} failed",
+    log_batch_del_fail_id: "[ERROR] Delete failed id={id}: {error}",
+    log_batch_del_fail: "[ERROR] Batch delete failed: {msg}",
+    log_restore_fail: "[ERROR] Restore failed: {msg}",
+  }
+};
+
+/** Translate a key with optional variable interpolation {varName} */
+function _i18n(lang, key, vars = {}) {
+  let str = (TRANSLATIONS[lang] || TRANSLATIONS.zh)[key];
+  if (str === undefined) str = TRANSLATIONS.zh[key] || key;
+  for (const [k, v] of Object.entries(vars)) {
+    str = str.replace(new RegExp(`\\{${k}\\}`, "g"), v);
+  }
+  return str;
+}
+
+// ============================================================
 // Utilities
 // ============================================================
 function genSessionId() {
@@ -801,6 +1144,21 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------------
+  // i18n helpers
+  // ------------------------------------------------------------------
+
+  /** Returns 'zh' for Chinese HA locales, 'en' for everything else */
+  get _lang() {
+    const lang = this._hass?.language || "zh-Hans";
+    return lang.toLowerCase().startsWith("zh") ? "zh" : "en";
+  }
+
+  /** Translate key with optional interpolation vars, e.g. _t('key', {n: 3}) */
+  _t(key, vars = {}) {
+    return _i18n(this._lang, key, vars);
+  }
+
+  // ------------------------------------------------------------------
   // WS helpers
   // ------------------------------------------------------------------
 
@@ -831,9 +1189,13 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _pushLog(msg) {
     let cls = "log-entry";
-    if (msg.startsWith("[ERROR]") || msg.includes("失败") || msg.includes("错误")) {
+    const m = msg.toLowerCase();
+    if (msg.startsWith("[ERROR]") || msg.includes("失败") || msg.includes("错误") ||
+        m.includes("fail") || m.includes("error")) {
       cls = "log-error";
-    } else if (msg.startsWith("[OK]") || msg.includes("完成") || msg.includes("成功")) {
+    } else if (msg.startsWith("[OK]") || msg.startsWith("[SUCCESS]") ||
+               msg.includes("完成") || msg.includes("成功") ||
+               m.includes("complete") || m.includes("success") || m.includes("saved")) {
       cls = "log-success";
     } else if (msg.startsWith("[PROMPT]")) {
       cls = "log-prompt";
@@ -901,7 +1263,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   async _deleteInaccessible() {
     const inaccessible = (this._automations || []).filter(a => a.id && a.id !== "new" && a.accessible === false);
     if (inaccessible.length === 0) return;
-    if (!confirm(`确定要清除全部 ${inaccessible.length} 条不可访问的 YAML 型自动化吗？\n\n注意：YAML 型自动化无法通过 API 删除，需在 HA 的 automations.yaml 文件中手动删除对应条目。`)) return;
+    if (!confirm(this._t("confirm_del_inaccessible", {n: inaccessible.length}))) return;
     this._delInaccessibleRunning = true;
     this._render();
     try {
@@ -914,28 +1276,25 @@ class HaLlmAutomationPanel extends HTMLElement {
       const normalDeleted = deleted.filter(d => !d.ghost);
       const yamlFailed = failed.filter(f => f.yaml_type);
       const realFailed = failed.filter(f => !f.yaml_type);
-      this._log(`[INFO] 清除不可访问：扫描 ${scanned} 条，API删除 ${normalDeleted.length} 条，注册表清除 ${ghostDeleted.length} 条，失败 ${failed.length} 条`);
-      // 幽灵实体（从注册表清除）
-      ghostDeleted.forEach(d => this._log(`[OK] 幽灵实体已清除：${d.alias || d.id}`));
-      // YAML 型：API 无法删除，提示手动操作
+      this._log(this._t("log_del_inaccessible_summary", {scanned, api: normalDeleted.length, ghost: ghostDeleted.length, fail: failed.length}));
+      ghostDeleted.forEach(d => this._log(this._t("log_ghost_cleared", {alias: d.alias || d.id})));
       if (yamlFailed.length > 0) {
-        this._log(`[WARN] ${yamlFailed.length} 条无法自动删除，需在 automations.yaml 中手动删除：`);
+        this._log(this._t("log_yaml_manual", {n: yamlFailed.length}));
         yamlFailed.forEach(f => this._log(`  • ${f.alias || f.id}`));
       }
-      // 真正的错误
-      realFailed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id} ${f.alias ? `(${f.alias})` : ""}：${f.error}`));
+      realFailed.forEach(f => this._log(this._t("log_del_fail_id", {id: f.id, alias: f.alias || "", error: f.error})));
       if (realFailed.length > 0) {
-        this._toast(`清除完成，${realFailed.length} 条异常失败（见日志）`, "error");
+        this._toast(this._t("toast_clear_partial_fail", {n: realFailed.length}), "error");
       } else if (yamlFailed.length > 0) {
-        this._toast(`已清除 ${deleted.length} 条；${yamlFailed.length} 条需手动删除（见日志）`, "warn");
+        this._toast(this._t("toast_clear_yaml_warn", {del: deleted.length, warn: yamlFailed.length}), "warn");
       } else {
-        this._toast(`已清除 ${deleted.length} 条不可访问的自动化`, "success");
+        this._toast(this._t("toast_cleared_n", {n: deleted.length}), "success");
       }
       await this._loadAutomations();
     } catch (e) {
       const msg = e?.message || e?.code || String(e);
-      this._log(`[ERROR] 清除不可访问失败：${msg}`);
-      this._toast(`清除失败：${msg}`, "error");
+      this._log(this._t("log_del_inaccessible_fail", {msg}));
+      this._toast(this._t("toast_clear_fail", {msg}), "error");
     } finally {
       this._delInaccessibleRunning = false;
       this._render();
@@ -1044,7 +1403,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       }
       this._createRefineVisible.delete(index);
     } catch (e) {
-      this._log(`[ERROR] 修改失败：${e.message || e}`);
+      this._log(this._t("log_refine_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1056,7 +1415,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       .filter((item, i) => this._createChecked.has(i) && item.parsed);
 
     if (automations.length === 0) {
-      this._toast("没有选中的自动化可以保存", "error");
+      this._toast(this._t("toast_no_sel"), "error");
       return;
     }
 
@@ -1069,10 +1428,10 @@ class HaLlmAutomationPanel extends HTMLElement {
         automations: automations.map(a => a.parsed),
         session_id: sessionId,
       });
-      this._toast(`保存成功：${r.results?.length || 0} 条`, "success");
+      this._toast(this._t("create_saving", {n: r.results?.length || 0}), "success");
       this._createResult = null;
     } catch (e) {
-      this._log(`[ERROR] 保存失败：${e.message || e}`);
+      this._log(this._t("log_save_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1107,7 +1466,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._optimizeAutoYaml = r.automation_yaml;
       this._optimizeOriginalYaml = r.automation_yaml;
     } catch (e) {
-      this._log(`[ERROR] 分析失败：${e.message || e}`);
+      this._log(this._t("log_analyze_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1132,7 +1491,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._optimizeGenResult = r;
       this._optimizeSystemPrompt = r.system_prompt || "";
     } catch (e) {
-      this._log(`[ERROR] 生成失败：${e.message || e}`);
+      this._log(this._t("log_generate_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1157,7 +1516,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       });
       this._optimizeGenResult = r;
     } catch (e) {
-      this._log(`[ERROR] 修改失败：${e.message || e}`);
+      this._log(this._t("log_refine_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1166,7 +1525,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   async _optimizeSave() {
     if (!this._optimizeGenResult?.parsed) {
-      this._toast("无法保存：YAML 校验失败", "error");
+      this._toast(this._t("toast_save_fail_yaml"), "error");
       return;
     }
     const sessionId = await this._startSession();
@@ -1179,12 +1538,12 @@ class HaLlmAutomationPanel extends HTMLElement {
         parsed: this._optimizeGenResult.parsed,
         session_id: sessionId,
       });
-      this._toast("优化保存成功", "success");
+      this._toast(this._t("toast_optimize_saved"), "success");
       this._optimizeAnalysis = null;
       this._optimizeGenResult = null;
       await this._loadAutomations();
     } catch (e) {
-      this._log(`[ERROR] 保存失败：${e.message || e}`);
+      this._log(this._t("log_save_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1206,7 +1565,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   _abort() {
     this._abortSignal = true;
     this._loading = false;
-    this._log("[ERROR] 操作已被用户终止");
+    this._log(this._t("log_aborted"));
     this._render();
   }
 
@@ -1227,7 +1586,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   async _startConsolidateAnalyze() {
     const selectedIds = [...(this._consolidateSelectedIds || [])];
     if (selectedIds.length === 0) {
-      this._log("[ERROR] 请至少选择一条自动化");
+      this._log(this._t("log_no_sel"));
       return;
     }
     this._abortSignal = false;
@@ -1251,9 +1610,9 @@ class HaLlmAutomationPanel extends HTMLElement {
       (r.fix_items || []).forEach((f, i) => {
         this._consolidateApproved[`fix_${i}`] = f;
       });
-      this._log("[OK] 分析完成");
+      this._log(this._t("log_analyze_done"));
     } catch (e) {
-      if (!this._abortSignal) this._log(`[ERROR] 分析失败：${e.message || e}`);
+      if (!this._abortSignal) this._log(this._t("log_analyze_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1278,7 +1637,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         this._consolidateApproved[`fix_${i}`] = f;
       });
     } catch (e) {
-      this._log(`[ERROR] 分析失败：${e.message || e}`);
+      this._log(this._t("log_analyze_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1311,7 +1670,7 @@ class HaLlmAutomationPanel extends HTMLElement {
         }
       }
     } catch (e) {
-      this._log(`[ERROR] 修改失败：${e.message || e}`);
+      this._log(this._t("log_refine_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1325,7 +1684,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       .filter(([k]) => k.startsWith("fix_")).map(([, v]) => v);
 
     if (approvedMerges.length === 0 && approvedFixes.length === 0) {
-      this._toast("没有批准的条目", "error");
+      this._toast(this._t("confirm_no_approved"), "error");
       return;
     }
 
@@ -1339,10 +1698,10 @@ class HaLlmAutomationPanel extends HTMLElement {
         approved_fixes: approvedFixes,
         session_id: sessionId,
       });
-      this._toast(`执行完成：${r.success} 成功，${r.failed} 失败`, r.failed > 0 ? "error" : "success");
+      this._toast(this._t("toast_exec_done", {ok: r.success, fail: r.failed}), r.failed > 0 ? "error" : "success");
       this._consolidatePlan = null;
     } catch (e) {
-      this._log(`[ERROR] 执行失败：${e.message || e}`);
+      this._log(this._t("log_exec_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1398,16 +1757,16 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     // Disable button to prevent double-click
     const btnSave = $("btn-save-config");
-    if (btnSave) { btnSave.disabled = true; btnSave.textContent = "⏳ 保存中..."; }
+    if (btnSave) { btnSave.disabled = true; btnSave.textContent = this._t("config_saving"); }
 
     try {
       await this._ws("save_config", payload);
       this._configData = { ...this._configData, ...payload };
-      this._toast("配置已保存", "success");
+      this._toast(this._t("toast_config_saved"), "success");
     } catch (e) {
-      this._toast(`保存失败：${e.message || e}`, "error");
+      this._toast(this._t("toast_save_fail", {msg: e.message || e}), "error");
     } finally {
-      if (btnSave) { btnSave.disabled = false; btnSave.textContent = "💾 保存配置"; }
+      if (btnSave) { btnSave.disabled = false; btnSave.textContent = this._t("config_save_btn"); }
     }
   }
 
@@ -1421,9 +1780,9 @@ class HaLlmAutomationPanel extends HTMLElement {
     this._render();
     try {
       const r = await this._ws("refresh_docs", { session_id: sessionId });
-      this._toast(`刷新完成：${(r.succeeded || []).join(", ")}`, "success");
+      this._toast(this._t("toast_docs_refreshed", {keys: (r.succeeded || []).join(", ")}), "success");
     } catch (e) {
-      this._log(`[ERROR] 刷新失败：${e.message || e}`);
+      this._log(this._t("log_refresh_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1436,21 +1795,21 @@ class HaLlmAutomationPanel extends HTMLElement {
       this._docPreview = { key, content: r.content, truncated: r.truncated };
       this._render();
     } catch (e) {
-      this._toast(`预览失败：${e.message || e}`, "error");
+      this._toast(this._t("toast_preview_fail", {msg: e.message || e}), "error");
     }
   }
 
   async _restoreBackup(path) {
-    const modeLabel = this._restoreMode === "overwrite" ? "覆盖（更新已有）" : "增量（跳过已有）";
-    if (!confirm(`确认以【${modeLabel}】模式恢复此备份？\n\n${path.split("/").pop()}`)) return;
+    const modeLabel = this._restoreMode === "overwrite" ? this._t("backup_overwrite") : this._t("backup_incremental");
+    if (!confirm(this._t("confirm_restore", {mode: modeLabel, file: path.split("/").pop()}))) return;
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
     try {
       await this._ws("restore_backup", { backup_path: path, session_id: sessionId, restore_mode: this._restoreMode });
-      this._toast("恢复完成", "success");
+      this._toast(this._t("toast_restore_done"), "success");
     } catch (e) {
-      this._log(`[ERROR] 恢复失败：${e.message || e}`);
+      this._log(this._t("log_restore_fail", {msg: e.message || e}));
     } finally {
       this._loading = false;
       this._render();
@@ -1458,15 +1817,15 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   async _clearBackups() {
-    if (!confirm("确认清空全部备份？不可恢复！")) return;
+    if (!confirm(this._t("confirm_clear_backups"))) return;
     const sessionId = genSessionId();
     try {
       const r = await this._ws("clear_backups", { session_id: sessionId });
-      this._toast(`已删除 ${r.deleted} 个备份文件`, "success");
+      this._toast(this._t("toast_backups_cleared", {n: r.deleted}), "success");
       this._backups = [];
       this._render();
     } catch (e) {
-      this._toast(`清空失败：${e.message || e}`, "error");
+      this._toast(this._t("toast_clear_all_fail", {msg: e.message || e}), "error");
     }
   }
 
@@ -1478,7 +1837,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="yaml-wrapper">
         <div class="yaml-block" id="${id || ""}">${escHtml(yaml)}</div>
-        <button class="yaml-copy-btn" data-yaml="${escHtml(yaml)}">复制</button>
+        <button class="yaml-copy-btn" data-yaml="${escHtml(yaml)}">${this._t("copy_btn")}</button>
       </div>
     `;
   }
@@ -1518,7 +1877,7 @@ class HaLlmAutomationPanel extends HTMLElement {
           }).join("")}
         </div>
         <button class="dropdown-toggle-btn" id="${id}-toggle">
-          ▼ 展开选择（${items.length} 个可选）
+          ${this._t("create_expand_hint", {n: items.length})}
         </button>
         <div class="multi-select-dropdown ${isOpen ? 'open' : ''}" id="${id}-dropdown">
           ${items.map(item => `
@@ -1544,15 +1903,15 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div class="card-title">描述自动化需求</div>
+        <div class="card-title">${this._t("create_title")}</div>
         <div class="form-row">
           <div class="input-wrap">
-            <textarea id="create-req" placeholder="例如：每天晚上10点关闭客厅所有灯；人离开后关闭空调和风扇" rows="4"></textarea>
+            <textarea id="create-req" placeholder="${this._t("create_placeholder")}" rows="4"></textarea>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary" id="btn-create-start" ${this._loading ? 'disabled' : ''}>
-            ${this._loading ? '<span class="spinner"></span> 生成中...' : '▶ 生成自动化'}
+            ${this._loading ? `<span class="spinner"></span> ${this._t("create_btn_loading")}` : this._t("create_btn")}
           </button>
         </div>
       </div>
@@ -1560,10 +1919,10 @@ class HaLlmAutomationPanel extends HTMLElement {
       ${result ? this._renderCreateResults(result) : ""}
       ${result && result.automations?.length ? `
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-secondary btn-sm" id="btn-create-select-all">☑ 全选</button>
-          <button class="btn btn-secondary btn-sm" id="btn-create-deselect-all">☐ 全不选</button>
+          <button class="btn btn-secondary btn-sm" id="btn-create-select-all">${this._t("create_sel_all")}</button>
+          <button class="btn btn-secondary btn-sm" id="btn-create-deselect-all">${this._t("create_sel_none")}</button>
           <button class="btn btn-success" id="btn-create-save" ${this._loading || checkedCount === 0 ? 'disabled' : ''}>
-            ${this._loading ? '<span class="spinner"></span>' : '✓'} 保存选中 (${checkedCount} 条)
+            ${this._loading ? '<span class="spinner"></span>' : '✓'} ${this._t("create_save_sel", {n: checkedCount})}
           </button>
         </div>
       ` : ""}
@@ -1572,7 +1931,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _renderCreateResults(result) {
     const items = result.automations || [];
-    if (!items.length) return '<div class="error-box">AI 未能生成有效的自动化配置</div>';
+    if (!items.length) return `<div class="error-box">${this._t("create_no_yaml")}</div>`;
 
     return items.map((item, i) => {
       const checked = this._createChecked.has(i);
@@ -1590,7 +1949,7 @@ class HaLlmAutomationPanel extends HTMLElement {
             <input type="checkbox" ${checked ? 'checked' : ''} ${!item.parsed ? 'disabled' : ''}
               id="auto-chk-${i}" style="width:auto;cursor:pointer" onclick="event.stopPropagation()">
             <span class="auto-title">[${i + 1}/${items.length}] ${escHtml(alias)}</span>
-            ${hasWarnings ? '<span class="tag tag-warn">⚠ 有问题</span>' : '<span class="tag tag-ok">✓ 正常</span>'}
+            ${hasWarnings ? `<span class="tag tag-warn">${this._t("create_has_issues")}</span>` : `<span class="tag tag-ok">${this._t("create_ok")}</span>`}
             <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
           </div>
           ${expanded ? `
@@ -1599,13 +1958,13 @@ class HaLlmAutomationPanel extends HTMLElement {
               ${this._renderYamlBlock(item.yaml_str, `yaml-${i}`)}
               <div class="btn-row">
                 <button class="btn btn-primary" id="btn-refine-toggle-${i}">
-                  ${refineVisible ? '▲ 收起追问' : '✏ 追问修改'}
+                  ${refineVisible ? this._t("create_refine_hide") : this._t("create_refine_show")}
                 </button>
               </div>
               <div class="refine-area ${refineVisible ? 'visible' : ''}" id="refine-area-${i}">
                 <div class="refine-input" style="margin-top:8px">
-                  <textarea id="refine-input-${i}" placeholder="输入修改意见让 AI 重新生成..." rows="2"></textarea>
-                  <button class="btn btn-secondary btn-sm" id="btn-refine-${i}">重新生成</button>
+                  <textarea id="refine-input-${i}" placeholder="${this._t("create_refine_placeholder")}" rows="2"></textarea>
+                  <button class="btn btn-secondary btn-sm" id="btn-refine-${i}">${this._t("create_refine_btn")}</button>
                 </div>
               </div>
             </div>
@@ -1627,56 +1986,56 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div class="card-title" style="margin:0">选择要优化的自动化</div>
+          <div class="card-title" style="margin:0">${this._t("opt_select_title")}</div>
           <button class="btn btn-secondary btn-sm" id="btn-opt-reload"
             ${this._automationsLoading ? 'disabled' : ''}>
-            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} 刷新列表
+            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} ${this._t("opt_refresh")}
           </button>
         </div>
         ${this._automationsLoading ? `
-          <div class="load-hint"><span class="spinner"></span> 正在加载自动化列表...</div>
+          <div class="load-hint"><span class="spinner"></span> ${this._t("opt_loading")}</div>
         ` : automations.length === 0 ? `
           <div class="load-hint">
-            ${this._automations === null ? '加载失败，请点击"刷新列表"重试' : '暂无可优化的自动化（存储型）'}
+            ${this._automations === null ? this._t("opt_load_fail") : this._t("opt_empty")}
           </div>
         ` : `
           <div class="form-row">
             <select id="opt-select">
-              <option value="">— 请选择 —</option>
+              <option value="">${this._t("opt_placeholder")}</option>
               ${automations.map(a => `<option value="${escHtml(a.id)}" ${this._optimizeSelectedId === a.id ? "selected" : ""}>${escHtml(a.alias)} [${escHtml(a.id)}]</option>`).join("")}
             </select>
           </div>
           <button class="btn btn-primary" id="btn-opt-analyze" ${this._loading || !this._optimizeSelectedId ? 'disabled' : ''}>
-            ${this._loading && !analysis ? '<span class="spinner"></span> 分析中...' : '分析意图 ▶'}
+            ${this._loading && !analysis ? `<span class="spinner"></span> ${this._t("opt_analyze_loading")}` : this._t("opt_analyze_btn")}
           </button>
         `}
       </div>
 
       ${analysis ? `
         <div class="card">
-          <div class="card-title" style="margin-bottom:10px">Step 1 — 分析报告</div>
+          <div class="card-title" style="margin-bottom:10px">${this._t("opt_step1_title")}</div>
           <div class="analysis-box">
             <div class="analysis-intent">🎯 ${escHtml(analysis.intent || "")}</div>
             ${analysis.issues?.length ? `
-              <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:4px">⚠ 发现的问题：</div>
+              <div style="font-size:12px;font-weight:700;color:#f87171;margin-bottom:4px">${this._t("opt_issues_title")}</div>
               <ul class="analysis-list analysis-issues">${analysis.issues.map(i => `<li>⚠ ${escHtml(i)}</li>`).join("")}</ul>
             ` : ""}
             ${analysis.suggestions?.length ? `
-              <div style="font-size:12px;font-weight:700;color:#4ade80;margin-top:8px;margin-bottom:4px">✦ 优化建议：</div>
+              <div style="font-size:12px;font-weight:700;color:#4ade80;margin-top:8px;margin-bottom:4px">${this._t("opt_sugg_title")}</div>
               <ul class="analysis-list analysis-suggs">${analysis.suggestions.map(s => `<li>✦ ${escHtml(s)}</li>`).join("")}</ul>
             ` : ""}
           </div>
           <div style="margin: 10px 0 6px">
-            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">追问 / 追加方向（可选）</label>
+            <label class="form-label" style="font-size:12px;margin-bottom:4px;display:block">${this._t("opt_direction_label")}</label>
             <div class="input-wrap">
               <textarea id="opt-direction-input" rows="2"
-                placeholder="可补充分析追问或优化方向，如：重点分析能否加夜间条件、补全其他区域设备..."></textarea>
+                placeholder="${this._t("opt_direction_placeholder")}"></textarea>
             </div>
           </div>
           <div class="btn-row" style="margin-top:8px">
-            <button class="btn btn-secondary" id="btn-opt-reanalyze" ${this._loading ? 'disabled' : ''}>🔄 重新分析</button>
+            <button class="btn btn-secondary" id="btn-opt-reanalyze" ${this._loading ? 'disabled' : ''}>${this._t("opt_reanalyze")}</button>
             <button class="btn btn-primary" id="btn-opt-generate" ${this._loading ? 'disabled' : ''}>
-              ${this._loading && !genResult ? '<span class="spinner"></span> 生成中...' : '生成优化方案 ▶'}
+              ${this._loading && !genResult ? `<span class="spinner"></span> ${this._t("opt_generate_loading")}` : this._t("opt_generate_btn")}
             </button>
           </div>
         </div>
@@ -1684,7 +2043,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
       ${genResult ? `
         <div class="card">
-          <div class="card-title">Step 2 — 优化结果</div>
+          <div class="card-title">${this._t("opt_step2_title")}</div>
           ${genResult.warnings?.length ? `<div class="error-box">${genResult.warnings.map(w => escHtml(w)).join("<br>")}</div>` : ""}
           ${analysis?.suggestions?.length ? `
             <div class="summary-badges">
@@ -1695,33 +2054,33 @@ class HaLlmAutomationPanel extends HTMLElement {
             </div>
           ` : ""}
           <div class="diff-mode-btns">
-            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'side' ? ' active' : ''}" id="btn-diff-side">⇔ 左右对比</button>
-            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'inline' ? ' active' : ''}" id="btn-diff-inline">≡ 内联 diff</button>
+            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'side' ? ' active' : ''}" id="btn-diff-side">${this._t("opt_diff_side")}</button>
+            <button class="btn btn-secondary btn-sm${this._optimizeDiffMode === 'inline' ? ' active' : ''}" id="btn-diff-inline">${this._t("opt_diff_inline")}</button>
           </div>
           ${this._optimizeDiffMode === 'side' ? `
             <div class="diff-container">
               <div>
-                <div class="diff-label">优化前</div>
+                <div class="diff-label">${this._t("opt_diff_before")}</div>
                 ${this._renderYamlBlock(this._optimizeOriginalYaml, "yaml-opt-before")}
               </div>
               <div>
-                <div class="diff-label">优化后</div>
+                <div class="diff-label">${this._t("opt_diff_after")}</div>
                 ${this._renderYamlBlock(genResult.yaml_str, "yaml-opt-after")}
               </div>
             </div>
           ` : `
-            <div class="diff-label" style="margin-bottom:4px">内联 diff（优化前 → 优化后）</div>
+            <div class="diff-label" style="margin-bottom:4px">${this._t("opt_diff_inline_label")}</div>
             <div class="yaml-block">${renderDiff(this._optimizeOriginalYaml, genResult.yaml_str)}</div>
           `}
           <div class="refine-input" style="margin-top:12px">
             <div class="input-wrap">
-              <textarea id="opt-refine-input" placeholder="输入追问修改意见..." rows="2"></textarea>
+              <textarea id="opt-refine-input" placeholder="${this._t("opt_refine_placeholder")}" rows="2"></textarea>
             </div>
-            <button class="btn btn-secondary btn-sm" id="btn-opt-refine">重新生成</button>
+            <button class="btn btn-secondary btn-sm" id="btn-opt-refine">${this._t("opt_refine_btn")}</button>
           </div>
           <div class="btn-row">
             <button class="btn btn-success" id="btn-opt-save" ${!genResult.parsed || this._loading ? 'disabled' : ''}>
-              💾 保存优化结果
+              ${this._t("opt_save_btn")}
             </button>
           </div>
         </div>
@@ -1744,26 +2103,26 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div class="card-title" style="margin:0">批量整合自动化</div>
+          <div class="card-title" style="margin:0">${this._t("cons_title")}</div>
           <button class="btn btn-secondary btn-sm" id="btn-cons-reload"
             ${this._automationsLoading ? 'disabled' : ''}>
-            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} 刷新列表
+            ${this._automationsLoading ? '<span class="spinner"></span>' : '🔄'} ${this._t("cons_refresh")}
           </button>
         </div>
         <p style="color:#9ca3af;margin:0 0 12px;font-size:13px">
-          分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。
+          ${this._t("cons_desc")}
         </p>
 
         ${this._automationsLoading ? `
-          <div class="load-hint"><span class="spinner"></span> 正在加载自动化列表...</div>
+          <div class="load-hint"><span class="spinner"></span> ${this._t("cons_loading")}</div>
         ` : consolidateAutomations.length === 0 ? `
           <div class="load-hint">
-            ${this._automations === null ? '加载失败，请点击"刷新列表"重试' : '暂无可整合的自动化（存储型）'}
+            ${this._automations === null ? this._t("cons_load_fail") : this._t("cons_empty")}
           </div>
         ` : `
           <div class="consolidate-select-panel" style="padding:0 0 12px 0">
             <div class="panel-label">
-              选择要参与整合的自动化（${selectedAccessibleCount}/${accessibleAutomations.length} 已选）：
+              ${this._t("cons_select_label", {sel: selectedAccessibleCount, total: accessibleAutomations.length})}
             </div>
             <div class="automation-checklist" id="consolidate-checklist">
               ${consolidateAutomations.map(a => `
@@ -1772,24 +2131,26 @@ class HaLlmAutomationPanel extends HTMLElement {
                     ${!a.accessible ? 'disabled' : ''}
                     ${selectedSet.has(a.id) ? 'checked' : ''}>
                   <span class="check-label">${escHtml(a.alias || a.id)}</span>
-                  ${!a.accessible ? '<span class="check-warning">⚠ 不可访问</span>' : ''}
+                  ${!a.accessible ? `<span class="check-warning">${this._t("cons_inaccessible")}</span>` : ''}
                 </label>
               `).join('')}
             </div>
             <div class="checklist-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-cons-select-all">☑ 全选</button>
-              <button class="btn btn-secondary btn-sm" id="btn-cons-deselect-all">☐ 全不选</button>
+              <button class="btn btn-secondary btn-sm" id="btn-cons-select-all">${this._t("cons_sel_all")}</button>
+              <button class="btn btn-secondary btn-sm" id="btn-cons-deselect-all">${this._t("cons_sel_none")}</button>
               ${inaccessibleCount > 0 ? `
               <button class="btn btn-secondary btn-sm" id="btn-cons-del-inaccessible"
                 style="color:#f87171;border-color:#f87171"
                 ${this._loading || this._delInaccessibleRunning ? 'disabled' : ''}>
                 ${this._delInaccessibleRunning
-                  ? '<span class="spinner"></span> 清除中...'
-                  : `🗑 清除不可访问（${inaccessibleCount} 条）`}
+                  ? `<span class="spinner"></span> ${this._t("cons_deleting")}`
+                  : this._t("cons_del_btn", {n: inaccessibleCount})}
               </button>` : ''}
               <button class="btn btn-primary" id="btn-cons-start-analyze"
                 ${this._loading || selectedAccessibleCount === 0 ? 'disabled' : ''}>
-                ${this._loading && !plan ? '<span class="spinner"></span> 分析中...' : '▶ 开始分析（' + selectedAccessibleCount + ' 条）'}
+                ${this._loading && !plan
+                  ? `<span class="spinner"></span> ${this._t("cons_analyze_loading")}`
+                  : this._t("cons_analyze_btn", {n: selectedAccessibleCount})}
               </button>
             </div>
           </div>
@@ -1808,20 +2169,20 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div class="card-title" style="margin:0">聚合方案</div>
+          <div class="card-title" style="margin:0">${this._t("cons_plan_title")}</div>
           <div style="font-size:12px;color:#9ca3af">
-            合并 ${merges.length} · 修复 ${fixes.length} · 无需修改 ${oks.length}
+            ${this._t("cons_summary", {merge: merges.length, fix: fixes.length, ok: oks.length})}
           </div>
         </div>
 
         ${(merges.length + fixes.length) > 0 ? `
           <div class="consolidate-batch-bar">
-            <span class="hint-text">已勾选 ${approvedCount} 项</span>
-            <button class="btn-sm btn-sm-plain" id="btn-cs-all">☑ 全选</button>
-            <button class="btn-sm btn-sm-plain" id="btn-cs-none">☐ 全不选</button>
+            <span class="hint-text">${this._t("cons_batch_selected", {n: approvedCount})}</span>
+            <button class="btn-sm btn-sm-plain" id="btn-cs-all">${this._t("cons_batch_all")}</button>
+            <button class="btn-sm btn-sm-plain" id="btn-cs-none">${this._t("cons_batch_none")}</button>
             <button class="btn btn-primary btn-sm" id="btn-cs-execute"
               ${this._loading || approvedCount === 0 ? 'disabled' : ''}>
-              ▶ 批量执行（${approvedCount} 项）
+              ${this._t("cons_batch_exec", {n: approvedCount})}
             </button>
           </div>
         ` : ""}
@@ -1836,8 +2197,8 @@ class HaLlmAutomationPanel extends HTMLElement {
               <div class="automation-header" id="cons-hdr-merge-${i}">
                 <input type="checkbox" class="cons-item-cb" data-key="merge_${i}"
                   ${approved && !skipped ? 'checked' : ''}>
-                <span class="tag tag-merge">合并</span>
-                <span class="auto-title">场景：${escHtml(g.scenario || "")}</span>
+                <span class="tag tag-merge">${this._t("cons_merge_tag")}</span>
+                <span class="auto-title">${this._t("cons_scenario", {name: escHtml(g.scenario || "")})}</span>
                 <span style="font-size:11px;color:#9ca3af">${(g.aliases || []).slice(0,3).join(" + ")}${g.aliases?.length > 3 ? '…' : ''}</span>
                 <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
               </div>
@@ -1847,25 +2208,25 @@ class HaLlmAutomationPanel extends HTMLElement {
                   ${(g.original_yamls || []).length > 0 ? `
                     <div style="margin-bottom:10px">
                       <div style="font-size:11px;font-weight:700;color:var(--secondary-text-color,#9ca3af);margin-bottom:6px">
-                        原始自动化（共 ${(g.original_yamls || []).length} 条，将被合并替换）：
+                        ${this._t("cons_originals", {n: (g.original_yamls || []).length})}
                       </div>
                       ${(g.original_yamls || []).map((oy, oi) => `
                         <div style="margin-bottom:6px">
                           <div style="font-size:11px;color:#818cf8;margin-bottom:3px">[${oi + 1}] ${escHtml(oy.id)}</div>
-                          ${oy.yaml ? this._renderYamlBlock(oy.yaml, `cons-orig-merge-${i}-${oi}`) : '<div style="color:#6b7280;font-size:11px">（无法获取原始配置）</div>'}
+                          ${oy.yaml ? this._renderYamlBlock(oy.yaml, `cons-orig-merge-${i}-${oi}`) : `<div style="color:#6b7280;font-size:11px">${this._t("cons_no_original")}</div>`}
                         </div>
                       `).join("")}
                     </div>
-                    <div style="font-size:11px;font-weight:700;color:#818cf8;margin-bottom:6px">合并后：</div>
+                    <div style="font-size:11px;font-weight:700;color:#818cf8;margin-bottom:6px">${this._t("cons_merged_label")}</div>
                   ` : ""}
                   ${this._renderYamlBlock(g.merged_yaml || "", `cons-yaml-merge-${i}`)}
                   <div class="refine-input" style="margin-top:8px">
-                    <textarea id="cons-refine-merge-${i}" placeholder="输入修改意见..." rows="2"></textarea>
-                    <button class="btn btn-secondary btn-sm" id="btn-cons-refine-merge-${i}">重新生成</button>
+                    <textarea id="cons-refine-merge-${i}" placeholder="${this._t("cons_refine_placeholder")}" rows="2"></textarea>
+                    <button class="btn btn-secondary btn-sm" id="btn-cons-refine-merge-${i}">${this._t("cons_refine_btn")}</button>
                   </div>
                   <div class="btn-row">
-                    <button class="btn btn-success btn-sm" id="btn-cons-approve-merge-${i}">✓ 批准</button>
-                    <button class="btn btn-secondary btn-sm" id="btn-cons-skip-merge-${i}">✗ 跳过</button>
+                    <button class="btn btn-success btn-sm" id="btn-cons-approve-merge-${i}">${this._t("cons_approve")}</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-cons-skip-merge-${i}">${this._t("cons_skip")}</button>
                   </div>
                 </div>
               ` : ""}
@@ -1883,33 +2244,33 @@ class HaLlmAutomationPanel extends HTMLElement {
               <div class="automation-header" id="cons-hdr-fix-${i}">
                 <input type="checkbox" class="cons-item-cb" data-key="fix_${i}"
                   ${approved && !skipped ? 'checked' : ''}>
-                <span class="tag tag-fix">修复</span>
+                <span class="tag tag-fix">${this._t("cons_fix_tag")}</span>
                 <span class="auto-title">${escHtml(f.alias || f.id)}</span>
                 <span style="font-size:11px;color:#f87171">${escHtml((f.issue || "").slice(0, 50))}</span>
                 <span style="font-size:14px;color:#6b7280">${expanded ? '▲' : '▼'}</span>
               </div>
               ${expanded ? `
                 <div class="auto-body">
-                  <p style="color:#f87171;font-size:12px;margin:0 0 8px">问题：${escHtml(f.issue || "")}</p>
+                  <p style="color:#f87171;font-size:12px;margin:0 0 8px">${this._t("cons_issue_prefix", {issue: escHtml(f.issue || "")})}</p>
                   ${f.original_yaml ? `
                     <div class="diff-container">
                       <div>
-                        <div class="diff-label">原始配置</div>
+                        <div class="diff-label">${this._t("cons_fix_before")}</div>
                         ${this._renderYamlBlock(f.original_yaml, `cons-orig-fix-${i}`)}
                       </div>
                       <div>
-                        <div class="diff-label">修复后</div>
+                        <div class="diff-label">${this._t("cons_fix_after")}</div>
                         ${this._renderYamlBlock(f.fixed_yaml || "", `cons-yaml-fix-${i}`)}
                       </div>
                     </div>
                   ` : this._renderYamlBlock(f.fixed_yaml || "", `cons-yaml-fix-${i}`)}
                   <div class="refine-input" style="margin-top:8px">
-                    <textarea id="cons-refine-fix-${i}" placeholder="输入修改意见..." rows="2"></textarea>
-                    <button class="btn btn-secondary btn-sm" id="btn-cons-refine-fix-${i}">重新生成</button>
+                    <textarea id="cons-refine-fix-${i}" placeholder="${this._t("cons_refine_placeholder")}" rows="2"></textarea>
+                    <button class="btn btn-secondary btn-sm" id="btn-cons-refine-fix-${i}">${this._t("cons_refine_btn")}</button>
                   </div>
                   <div class="btn-row">
-                    <button class="btn btn-success btn-sm" id="btn-cons-approve-fix-${i}">✓ 批准</button>
-                    <button class="btn btn-secondary btn-sm" id="btn-cons-skip-fix-${i}">✗ 跳过</button>
+                    <button class="btn btn-success btn-sm" id="btn-cons-approve-fix-${i}">${this._t("cons_approve")}</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-cons-skip-fix-${i}">${this._t("cons_skip")}</button>
                   </div>
                 </div>
               ` : ""}
@@ -1919,14 +2280,14 @@ class HaLlmAutomationPanel extends HTMLElement {
 
         ${oks.length ? `
           <div style="padding:8px 12px;background:rgba(74,222,128,0.04);border-radius:8px;font-size:12px;color:#4ade80;margin-top:4px">
-            ✓ ${oks.length} 条无需修改：${oks.map(o => o.alias).join("、")}
+            ${this._t("cons_ok_items", {n: oks.length, list: oks.map(o => o.alias).join("、")})}
           </div>
         ` : ""}
 
         <div style="margin-top:14px;display:flex;justify-content:flex-end">
           <button class="btn btn-success" id="btn-cons-execute"
             ${this._loading || approvedCount === 0 ? 'disabled' : ''}>
-            ${this._loading ? '<span class="spinner"></span>' : '⚡'} 执行所有批准项 (${approvedCount})
+            ${this._loading ? '<span class="spinner"></span>' : '⚡'} ${this._t("cons_exec_all", {n: approvedCount})}
           </button>
         </div>
       </div>
@@ -1940,7 +2301,7 @@ class HaLlmAutomationPanel extends HTMLElement {
   _renderConfig() {
     const c = this._configData;
     if (!this._configLoaded) {
-      return `<div class="card"><div style="color:#9ca3af;text-align:center;padding:30px">加载配置中...</div></div>`;
+      return `<div class="card"><div style="color:#9ca3af;text-align:center;padding:30px">${this._t("config_loading")}</div></div>`;
     }
 
     const areaFilter = c.area_filter || [];
@@ -1952,7 +2313,7 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div class="card-title">LLM 接口配置</div>
+        <div class="card-title">${this._t("config_title")}</div>
 
         <div class="form-row">
           <label class="form-label">Provider</label>
@@ -1973,12 +2334,12 @@ class HaLlmAutomationPanel extends HTMLElement {
         </div>
 
         <div class="form-row">
-          <label class="form-label">Base URL（openai_compatible 需填，如 https://api.xxx.com/v1）</label>
+          <label class="form-label">${this._t("config_base_url")}</label>
           <input type="text" id="cfg-base-url" value="${escHtml(c.base_url || "")}" placeholder="https://api.openai.com/v1">
         </div>
 
         <div class="form-row">
-          <label class="form-label">模型名称</label>
+          <label class="form-label">${this._t("config_model")}</label>
           <input type="text" id="cfg-model" value="${escHtml(c.model || "gpt-4o")}" placeholder="gpt-4o">
         </div>
 
@@ -1994,21 +2355,21 @@ class HaLlmAutomationPanel extends HTMLElement {
         </div>
 
         <div class="config-section">
-          <div class="config-section-title">实体筛选（可选）</div>
-          <p class="hint-text">注：以下筛选仅影响发送给 LLM 的设备与实体列表，不影响自动化的分析范围。</p>
+          <div class="config-section-title">${this._t("config_filter_title")}</div>
+          <p class="hint-text">${this._t("config_filter_note")}</p>
 
           <div class="form-row">
-            <label class="form-label">额外可见域（逗号分隔，如 notify,remote）</label>
+            <label class="form-label">${this._t("config_extra_domains")}</label>
             <input type="text" id="cfg-extra-domains-input" value="${escHtml(c.extra_visible_domains || "")}" placeholder="notify,remote">
           </div>
 
           <div class="form-row">
-            <label class="form-label">隐藏域（输入 domain + 回车）</label>
-            <div style="margin-top:0"><input type="text" id="cfg-hidden-domains" value="${escHtml(c.hidden_domains || "")}" placeholder="weather,person（逗号分隔）" style="font-size:12px"></div>
+            <label class="form-label">${this._t("config_hidden_domains")}</label>
+            <div style="margin-top:0"><input type="text" id="cfg-hidden-domains" value="${escHtml(c.hidden_domains || "")}" placeholder="${this._t("config_hidden_placeholder")}" style="font-size:12px"></div>
           </div>
 
           <div class="form-row">
-            <label class="form-label">仅显示区域（选择后实体列表只含这些区域）</label>
+            <label class="form-label">${this._t("config_area_filter")}</label>
             ${this._renderMultiSelect(
               "cfg-area", this._areas,
               areaFilter, "name", "area_id",
@@ -2017,7 +2378,7 @@ class HaLlmAutomationPanel extends HTMLElement {
           </div>
 
           <div class="form-row">
-            <label class="form-label">仅显示集成</label>
+            <label class="form-label">${this._t("config_integ_filter")}</label>
             ${this._renderMultiSelect(
               "cfg-integ",
               this._integrations.map(s => ({label_id: s, name: s})),
@@ -2027,7 +2388,7 @@ class HaLlmAutomationPanel extends HTMLElement {
           </div>
 
           <div class="form-row">
-            <label class="form-label">仅显示标签</label>
+            <label class="form-label">${this._t("config_label_filter")}</label>
             ${this._renderMultiSelect(
               "cfg-label", this._labels.map(l => ({label_id: l.label_id, name: l.name || l.label_id})),
               labelFilter, "name", "label_id",
@@ -2037,19 +2398,19 @@ class HaLlmAutomationPanel extends HTMLElement {
         </div>
 
         <div class="config-section">
-          <div class="config-section-title">高级选项</div>
+          <div class="config-section-title">${this._t("config_advanced")}</div>
           <label class="checkbox-row">
             <input type="checkbox" id="cfg-log-prompt" ${c.log_prompt ? 'checked' : ''}>
-            在日志中打印发给 LLM 的 Prompt 文本（紫色显示）
+            ${this._t("config_log_prompt")}
           </label>
           <label class="checkbox-row" style="margin-top:8px">
             <input type="checkbox" id="cfg-use-docs" ${c.use_docs !== false ? 'checked' : ''}>
-            在 Prompt 中注入 HA 官方文档（本地缓存，7 天后自动更新；关闭则完全跳过）
+            ${this._t("config_use_docs")}
           </label>
         </div>
 
         <div style="margin-top:18px">
-          <button class="btn btn-primary" id="btn-save-config">💾 保存配置</button>
+          <button class="btn btn-primary" id="btn-save-config">${this._t("config_save_btn")}</button>
         </div>
       </div>
     `;
@@ -2067,56 +2428,56 @@ class HaLlmAutomationPanel extends HTMLElement {
 
     return `
       <div class="card">
-        <div class="card-title">知识库文档</div>
+        <div class="card-title">${this._t("know_title")}</div>
         <ul class="doc-list">
           ${DOC_KEYS.map(k => `
             <li class="doc-item">
               <span class="doc-key">${k}</span>
-              <button class="btn btn-secondary btn-sm" id="btn-preview-doc-${k}">预览</button>
+              <button class="btn btn-secondary btn-sm" id="btn-preview-doc-${k}">${this._t("know_preview_btn")}</button>
             </li>
           `).join("")}
         </ul>
         ${this._docPreview.key ? `
           <div style="margin-top:10px">
             <div style="font-size:12px;color:#9ca3af;margin-bottom:4px">
-              ${escHtml(this._docPreview.key)}${this._docPreview.truncated ? " (已截断至 5000 字符)" : ""}
+              ${escHtml(this._docPreview.key)}${this._docPreview.truncated ? ` ${this._t("know_truncated")}` : ""}
             </div>
             <div class="doc-preview-area visible">${escHtml(this._docPreview.content || "")}</div>
           </div>
         ` : ""}
         <div style="margin-top:14px">
           <button class="btn btn-primary" id="btn-refresh-docs" ${this._loading ? 'disabled' : ''}>
-            ${this._loading ? '<span class="spinner"></span> 刷新中...' : '刷新文档缓存'}
+            ${this._loading ? `<span class="spinner"></span> ${this._t("know_refreshing")}` : this._t("know_refresh_btn")}
           </button>
         </div>
       </div>
 
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div class="card-title" style="margin:0">备份管理</div>
+          <div class="card-title" style="margin:0">${this._t("backup_title")}</div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-secondary btn-sm" id="btn-load-backups">刷新列表</button>
-            <button class="btn btn-danger btn-sm" id="btn-clear-backups">🗑 清空全部</button>
+            <button class="btn btn-secondary btn-sm" id="btn-load-backups">${this._t("backup_refresh")}</button>
+            <button class="btn btn-danger btn-sm" id="btn-clear-backups">${this._t("backup_clear_all")}</button>
           </div>
         </div>
         <!-- 恢复模式选择器 -->
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;background:rgba(129,140,248,0.06);border-radius:8px;flex-wrap:wrap">
-          <span style="font-size:12px;color:var(--secondary-text-color)">恢复模式：</span>
-          <button class="btn btn-sm ${this._restoreMode === 'incremental' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-incremental">增量（跳过已有）</button>
-          <button class="btn btn-sm ${this._restoreMode === 'overwrite' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-overwrite">覆盖（更新已有）</button>
-          <span style="font-size:11px;color:#6b7280">${this._restoreMode === 'incremental' ? '已有同名自动化将跳过' : '已有同名自动化将被覆盖更新'}</span>
+          <span style="font-size:12px;color:var(--secondary-text-color)">${this._t("backup_mode_label")}</span>
+          <button class="btn btn-sm ${this._restoreMode === 'incremental' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-incremental">${this._t("backup_incremental")}</button>
+          <button class="btn btn-sm ${this._restoreMode === 'overwrite' ? 'btn-primary' : 'btn-secondary'}" id="btn-mode-overwrite">${this._t("backup_overwrite")}</button>
+          <span style="font-size:11px;color:#6b7280">${this._restoreMode === 'incremental' ? this._t("backup_incremental_hint") : this._t("backup_overwrite_hint")}</span>
         </div>
         ${this._backups.length === 0 ? `
-          <div style="color:#6b7280;text-align:center;padding:20px;font-size:13px">暂无备份记录</div>
+          <div style="color:#6b7280;text-align:center;padding:20px;font-size:13px">${this._t("backup_empty")}</div>
         ` : `
           <ul class="backup-list">
             ${this._backups.map((b, i) => `
               <li class="backup-item">
                 <div class="backup-info">
                   <div class="backup-name">${escHtml(b.name)}</div>
-                  <div class="backup-meta">${escHtml(b.mtime)} · ${b.count} 条 · ${b.size_kb}KB</div>
+                  <div class="backup-meta">${escHtml(b.mtime)} · ${this._t("backup_meta", {count: b.count, size: b.size_kb})}</div>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="btn-restore-${i}">恢复</button>
+                <button class="btn btn-secondary btn-sm" id="btn-restore-${i}">${this._t("backup_restore_btn")}</button>
               </li>
             `).join("")}
           </ul>
@@ -2133,12 +2494,12 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="log-panel">
         <div class="log-title">
-          运行日志
-          <button class="btn btn-secondary btn-sm" id="btn-clear-log">清空</button>
+          ${this._t("log_title")}
+          <button class="btn btn-secondary btn-sm" id="btn-clear-log">${this._t("log_clear")}</button>
         </div>
         <div class="log-entries">
           ${this._logs.length === 0
-            ? '<div style="color:#374151;text-align:center;padding:20px">等待操作...</div>'
+            ? `<div style="color:#374151;text-align:center;padding:20px">${this._t("log_waiting")}</div>`
             : this._logs.map(l => `<div class="${l.cls}">${escHtml(l.text)}</div>`).join("")
           }
         </div>
@@ -2152,12 +2513,12 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _renderManage() {
     if (this._automationsLoading) {
-      return `<div class="card" style="text-align:center;padding:24px"><span class="spinner"></span> 加载中...</div>`;
+      return `<div class="card" style="text-align:center;padding:24px"><span class="spinner"></span> ${this._t("manage_loading")}</div>`;
     }
     if (this._automations === null) {
       return `<div class="card"><div style="text-align:center;padding:20px">
-        <div style="color:#9ca3af;margin-bottom:12px">自动化列表未加载</div>
-        <button class="btn btn-primary" id="btn-manage-reload">🔄 加载列表</button>
+        <div style="color:#9ca3af;margin-bottom:12px">${this._t("manage_not_loaded")}</div>
+        <button class="btn btn-primary" id="btn-manage-reload">${this._t("manage_load_btn")}</button>
       </div></div>`;
     }
     const list = (this._automations || []).filter(a => a.id && a.id !== "new");
@@ -2166,18 +2527,18 @@ class HaLlmAutomationPanel extends HTMLElement {
     return `
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div class="card-title" style="margin:0">自动化管理
-            <span style="font-weight:400;font-size:13px;color:#9ca3af"> ${list.length} 条</span>
+          <div class="card-title" style="margin:0">${this._t("manage_title")}
+            <span style="font-weight:400;font-size:13px;color:#9ca3af"> ${list.length}</span>
           </div>
-          <button class="btn btn-secondary btn-sm" id="btn-manage-reload">🔄 刷新列表</button>
+          <button class="btn btn-secondary btn-sm" id="btn-manage-reload">${this._t("manage_refresh")}</button>
         </div>
-        ${list.length === 0 ? `<div style="color:#6b7280;text-align:center;padding:20px">暂无自动化</div>` : `
+        ${list.length === 0 ? `<div style="color:#6b7280;text-align:center;padding:20px">${this._t("manage_empty")}</div>` : `
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 10px;background:rgba(129,140,248,0.07);border-radius:8px;flex-wrap:wrap">
-            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-all">全选</button>
-            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-none">全不选</button>
-            <span style="flex:1;font-size:12px;color:#9ca3af">已选 ${checkedCount} 条</span>
-            <button class="btn btn-secondary btn-sm" id="btn-manage-backup" ${checkedCount === 0 ? 'disabled' : ''}>💾 备份选中(${checkedCount})</button>
-            <button class="btn btn-danger btn-sm" id="btn-manage-delete" ${checkedCount === 0 ? 'disabled' : ''}>🗑 删除选中(${checkedCount})</button>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-all">${this._t("manage_sel_all")}</button>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-sel-none">${this._t("manage_sel_none")}</button>
+            <span style="flex:1;font-size:12px;color:#9ca3af">${this._t("manage_selected", {n: checkedCount})}</span>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-backup" ${checkedCount === 0 ? 'disabled' : ''}>${this._t("manage_backup_btn", {n: checkedCount})}</button>
+            <button class="btn btn-danger btn-sm" id="btn-manage-delete" ${checkedCount === 0 ? 'disabled' : ''}>${this._t("manage_delete_btn", {n: checkedCount})}</button>
           </div>
           <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px">
             ${list.map(a => {
@@ -2190,7 +2551,7 @@ class HaLlmAutomationPanel extends HTMLElement {
                   style="accent-color:#818cf8;flex-shrink:0;width:15px;height:15px">
                 <div style="flex:1;min-width:0">
                   <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.alias || a.id)}</div>
-                  <div style="font-size:11px;color:#6b7280;margin-top:1px">${escHtml(a.id)} · ${escHtml(a.mode || "single")}${inaccessible ? ' · <span style="color:#f87171">不可访问</span>' : ''}</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:1px">${escHtml(a.id)} · ${escHtml(a.mode || "single")}${inaccessible ? ` · <span style="color:#f87171">${this._t("manage_inaccessible")}</span>` : ''}</div>
                 </div>
               </li>`;
             }).join("")}
@@ -2205,12 +2566,12 @@ class HaLlmAutomationPanel extends HTMLElement {
       .filter(a => this._manageChecked.has(a.id) && a.accessible !== false)
       .map(a => a.id);
     if (ids.length === 0) return;
-    if (!confirm(`备份选中的 ${ids.length} 条自动化？`)) return;
+    if (!confirm(this._t("confirm_backup_sel", {n: ids.length}))) return;
     try {
       const r = await this._ws("backup_selected", { automation_ids_csv: ids.join(",") });
-      this._toast(`已备份 ${r.count} 条 → ${r.name}`, "success");
+      this._toast(this._t("toast_backed_up", {n: r.count, file: r.name}), "success");
     } catch (e) {
-      this._toast(`备份失败：${e.message || e}`, "error");
+      this._toast(this._t("toast_backup_fail", {msg: e.message || e}), "error");
     }
   }
 
@@ -2219,7 +2580,7 @@ class HaLlmAutomationPanel extends HTMLElement {
       .filter(a => this._manageChecked.has(a.id) && a.accessible !== false)
       .map(a => a.id);
     if (ids.length === 0) return;
-    if (!confirm(`确定删除选中的 ${ids.length} 条自动化？此操作不可撤销。`)) return;
+    if (!confirm(this._t("confirm_del_sel", {n: ids.length}))) return;
     const sessionId = await this._startSession();
     this._loading = true;
     this._render();
@@ -2230,18 +2591,18 @@ class HaLlmAutomationPanel extends HTMLElement {
       });
       const deleted = r.deleted || [];
       const failed = r.failed || [];
-      this._log(`[INFO] 批量删除：成功 ${deleted.length} 条，失败 ${failed.length} 条`);
-      failed.forEach(f => this._log(`[ERROR] 删除失败 id=${f.id}：${f.error}`));
+      this._log(this._t("log_batch_del_summary", {ok: deleted.length, fail: failed.length}));
+      failed.forEach(f => this._log(this._t("log_batch_del_fail_id", {id: f.id, error: f.error})));
       if (failed.length > 0) {
-        this._toast(`已删除 ${deleted.length} 条，${failed.length} 条失败（见日志）`, "error");
+        this._toast(this._t("toast_del_partial_fail", {ok: deleted.length, fail: failed.length}), "error");
       } else {
-        this._toast(`已删除 ${deleted.length} 条`, "success");
+        this._toast(this._t("toast_deleted_n", {n: deleted.length}), "success");
       }
       this._manageChecked.clear();
       await this._loadAutomations();
     } catch (e) {
-      this._log(`[ERROR] 批量删除失败：${e.message || e}`);
-      this._toast(`删除失败：${e.message || e}`, "error");
+      this._log(this._t("log_batch_del_fail", {msg: e.message || e}));
+      this._toast(this._t("toast_del_fail", {msg: e.message || e}), "error");
     } finally {
       this._loading = false;
       this._render();
@@ -2254,12 +2615,12 @@ class HaLlmAutomationPanel extends HTMLElement {
 
   _render() {
     const tabs = [
-      { id: "create", label: "✨ 创建" },
-      { id: "optimize", label: "🔧 优化" },
-      { id: "consolidate", label: "🔗 聚合" },
-      { id: "manage", label: "📋 管理" },
-      { id: "config", label: "⚙ 配置" },
-      { id: "knowledge", label: "📚 知识库/备份" },
+      { id: "create", label: this._t("tab_create") },
+      { id: "optimize", label: this._t("tab_optimize") },
+      { id: "consolidate", label: this._t("tab_consolidate") },
+      { id: "manage", label: this._t("tab_manage") },
+      { id: "config", label: this._t("tab_config") },
+      { id: "knowledge", label: this._t("tab_knowledge") },
     ];
 
     let mainContent = "";
@@ -2273,7 +2634,7 @@ class HaLlmAutomationPanel extends HTMLElement {
     // 主题按钮三态
     const _themeAttr = this.getAttribute("data-theme");
     const _themeIcon  = _themeAttr === "dark" ? "🌙" : _themeAttr === "light" ? "☀️" : "🖥️";
-    const _themeLabel = _themeAttr === "dark" ? "暗色" : _themeAttr === "light" ? "亮色" : "自动";
+    const _themeLabel = _themeAttr === "dark" ? this._t("theme_dark") : _themeAttr === "light" ? this._t("theme_light") : this._t("theme_auto");
     const _themeCls   = _themeAttr === "dark" ? "theme-dark" : _themeAttr === "light" ? "theme-light" : "theme-auto";
 
     // 保存滚动位置，防止 innerHTML 重写后归零
@@ -2302,8 +2663,8 @@ class HaLlmAutomationPanel extends HTMLElement {
       <div class="header">
         <h1>🤖 HA LLM Automation</h1>
         ${this._loading ? '<span class="spinner" style="color:#818cf8"></span>' : ""}
-        ${this._loading ? '<button class="icon-btn abort-btn" id="btn-abort" title="终止当前操作">■</button>' : ""}
-        <button class="icon-btn theme-btn ${_themeCls}" id="btn-toggle-theme" title="切换主题（当前：${_themeLabel}）">${_themeIcon}<span class="theme-label">${_themeLabel}</span></button>
+        ${this._loading ? `<button class="icon-btn abort-btn" id="btn-abort" title="${this._t("abort_title")}">■</button>` : ""}
+        <button class="icon-btn theme-btn ${_themeCls}" id="btn-toggle-theme" title="${this._t("theme_toggle", {label: _themeLabel})}">${_themeIcon}<span class="theme-label">${_themeLabel}</span></button>
       </div>
       <div class="tabs">
         ${tabs.map(t => `<div class="tab ${this._tab === t.id ? "active" : ""}" data-tab="${t.id}">${t.label}</div>`).join("")}
@@ -2728,9 +3089,9 @@ class HaLlmAutomationPanel extends HTMLElement {
       btn.addEventListener("click", () => {
         const yaml = btn.dataset.yaml || "";
         navigator.clipboard.writeText(yaml).then(() => {
-          this._toast("已复制到剪贴板", "success");
+          this._toast(this._t("toast_copied"), "success");
         }).catch(() => {
-          this._toast("复制失败（请手动选择复制）", "error");
+          this._toast(this._t("toast_copy_fail"), "error");
         });
       });
     });
