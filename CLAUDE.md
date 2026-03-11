@@ -5,7 +5,7 @@
 本项目是一个基于大模型（LLM）的 Home Assistant 自动化创建与管理工具。
 目标是通过自然语言描述，自动生成、修改、备份 HA 自动化脚本，最终封装为 HA 集成插件。
 
-**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.5.1**（v2.5基础上：移动端输入框 CSS 精准优化，保留流光渐变边框动画）。
+**开发阶段：** 三大核心模式均已实现（create / optimize / consolidate）；CLI 工具（`python3 main.py`）与 HACS Custom Component（`custom_components/ha_llm_automation/`）均已完成。当前版本：**v2.6**（前端全量 i18n，中英文随 HA 语言自动切换；新增 hacs.json 准备 GitHub 发布）。
 
 ---
 
@@ -487,7 +487,8 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - [ ] WebSocket `config/automation/config/list` 在 HA 2026.2.3 返回 unknown_command，自动化配置只能 REST GET 逐条获取
 - [ ] consolidate 命令：场景驱动策略已实现，端到端效果待实测
 - [x] 清除不可访问自动化：两级清除策略已实测验证（幽灵实体通过注册表移除成功清除）
-- [ ] HACS 卡片图标：需推送至 GitHub + 通过 HACS 安装才可生效；本地部署阶段无法展示
+- [ ] HACS 卡片图标/发布：hacs.json 已就绪，需推送至 GitHub + 通过 HACS 安装才可生效
+- [ ] i18n 翻译完整性：v2.6 已覆盖全部 UI，后续新增文案需同步更新 TRANSLATIONS 常量
 
 ### v2.2 已修复
 
@@ -544,13 +545,25 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **修复**：`@media (hover:none)` 内仅保留 `inputGradientFlow`（6s）；禁用 `inputLiquidRipple`；所有 `transition: none !important`；所有 focus 触发的 `box-shadow: none !important`；补偿：`.input-wrap` 加常驻微光（不依赖 focus，无变化）
 - **结果**：手机端流光渐变边框 + 常驻微光保留；键盘稳定不收起；桌面端完整效果不变
 
+### v2.6 新增功能（前端全量 i18n + hacs.json）
+
+- **前端全量 i18n**：
+  - 新增 `TRANSLATIONS` 常量（`zh` / `en` 两套，覆盖全部 UI 文案）
+  - 全局 `_i18n(lang, key, vars)` 函数，支持 `{varName}` 插值
+  - `_lang` getter：读 `hass.language`，`zh-*` → `zh`，其余 → `en`
+  - `_t(key, vars)` 实例方法，全部 6 个 Tab 的 `_render*()` 方法均改用 `_t()`
+  - 完整覆盖：confirm 弹窗、toast 消息、日志面板、按钮文字、说明文字
+  - `_pushLog()` 颜色检测兼容中英文关键词（ERROR/错误、WARN/警告、OK/成功等）
+- **hacs.json**：项目根目录新增 HACS 集成元数据文件，支持未来 GitHub/HACS 发布
+  - `homeassistant: "2024.2.0"`，`content_in_root: false`
+
 ### macOS 退格键 / 方向键异常
 
 **已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。
 
 ---
 
-## 十二、HACS Custom Component（已实现，v2.4）
+## 十二、HACS Custom Component（已实现，v2.6）
 
 `custom_components/ha_llm_automation/` 已完整实现，结构如下：
 
@@ -565,7 +578,8 @@ custom_components/ha_llm_automation/
 │   └── automations_utils.py
 ├── knowledge/ / llm_client/ / backup/
 ├── icon.png             ← HACS 图标（256×256 RGBA）
-└── frontend/ha-llm-automation.js  ← v2.4 前端（液态荡漾输入框）
+└── frontend/ha-llm-automation.js  ← v2.6 前端（液态荡漾输入框 + 全量 i18n）
+hacs.json                ← HACS 集成元数据（根目录）
 ```
 
 ### 关键设计决策
