@@ -123,22 +123,6 @@
 
 ---
 
-## 🛠 命令行（CLI）模式
-
-除了 HACS 插件形式，项目还提供一个独立的 CLI 工具，适合在电脑上批量操作：
-
-```bash
-git clone https://github.com/huangguabaiyi/ha-llm-automation.git
-cd ha-llm-automation
-pip install -r requirements.txt
-cp config.example.json config.json  # 填写 HA + LLM 配置
-python3 main.py                      # 启动交互式菜单
-```
-
-详见 `CLAUDE.md` 的"命令行"章节。
-
----
-
 ## ⚠️ 已知限制
 
 - **YAML 型自动化**（写在 `automations.yaml` 里的）无法通过本工具读取/修改，只能操作"存储型"自动化（HA UI 或本工具创建的）。工具会自动过滤不可访问的条目。
