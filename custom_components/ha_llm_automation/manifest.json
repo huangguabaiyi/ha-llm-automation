@@ -2,7 +2,8 @@
   "domain": "ha_llm_automation",
   "name": "HA LLM Automation",
   "version": "1.0.0",
-  "documentation": "https://github.com/your-repo/ha-llm-automation",
+  "documentation": "https://github.com/huangguabaiyi/ha-llm-automation",
+  "issue_tracker": "https://github.com/huangguabaiyi/ha-llm-automation/issues",
   "requirements": [
     "openai>=1.0",
     "anthropic>=0.18",
