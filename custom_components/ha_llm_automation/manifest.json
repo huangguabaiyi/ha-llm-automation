@@ -1,7 +1,7 @@
 {
   "domain": "ha_llm_automation",
   "name": "HA LLM Automation",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/huangguabaiyi/ha-llm-automation",
   "issue_tracker": "https://github.com/huangguabaiyi/ha-llm-automation/issues",
   "requirements": [

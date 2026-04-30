@@ -123,6 +123,25 @@
 
 ---
 
+## 🔄 重装 / 升级说明
+
+### 升级插件（HACS 推送新版本）
+直接在 HACS 里 Update，重启 HA 即可。**你的 LLM 配置会保留**，不用重填 API Key。
+
+### 彻底卸载并清空所有配置
+如果需要完全重置（例如换 API Provider、或排查问题），仅卸载 HACS 是**不够的**：
+
+```
+设置 → 设备与服务 → HA LLM Automation → 右侧 ⋮ → 【删除集成】
+         ↓ 这一步才会清除 API Key、模型设置等所有配置
+HACS → HA LLM Automation → 移除
+重启 HA
+```
+
+仅在 HACS 里 Remove，或者仅删除 `custom_components/ha_llm_automation/` 目录，配置会保留在 HA 的 `.storage/core.config_entries` 里，下次重装时自动恢复。
+
+---
+
 ## ⚠️ 已知限制
 
 - **YAML 型自动化**（写在 `automations.yaml` 里的）无法通过本工具读取/修改，只能操作"存储型"自动化（HA UI 或本工具创建的）。工具会自动过滤不可访问的条目。
