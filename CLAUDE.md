@@ -570,6 +570,19 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
 - **兜底**：新增 `scripts/check_frontend.sh`（`node --check`，零依赖），对 `frontend/*.js` 做语法校验；已写入开发规范「前端 JS 校验（必做）」小节
 - **版本**：`manifest.json` 从 `2.6` bump 到 `2.6.1`
 
+### v2.6.2 已修复（白屏硬化 — 缓存破除 + 构造期异常可见化）
+
+- **现象**：v1.0.2 修了 JS 语法错误但部分用户 HACS 更新 + Chrome 硬刷新后仍白屏
+- **两个根因**：
+  - HA 是 PWA，带 Service Worker，`js_url` 固定路径时 SW 会一直命中旧缓存；硬刷新不保证绕过 SW
+  - `customElements.define` 成功但 upgrade 过程（constructor / connectedCallback / set hass / _render）抛异常 → `<ha-llm-automation>` 停留在 unresolved 状态 → 肉眼就是白屏，零错误信息
+- **修复**：
+  - `__init__.py` 新增 `_read_manifest_version()`，`js_url` 拼 `?v=<version>` → 每版 URL 变化必然 SW cache miss
+  - `ha-llm-automation.js`：`constructor` 拆出 `_initState()`，外层包 try/catch；`connectedCallback` / `set hass` / `_render`（作为 `_renderInner` 外层）同样保护；新增 `_renderFatalError(err, phase)` 渲染红色错误卡片（中英双语硬编码，不依赖 i18n/STYLES/shadowRoot）
+  - README 新增「面板白屏排障」6 步骤（版本号 + 硬刷 + 无痕 + Console + 清前端缓存 + HACS Redownload）
+- **版本**：`manifest.json` `1.0.2` → `1.0.3`
+- **不变量**：往后任何未来 regression 导致构造期失败 → 用户看到红色错误卡片（Phase / Error / stack 前 5 行），不再白屏；定位成本从"不可见"变"一眼可见"
+
 ### macOS 退格键 / 方向键异常
 
 **已修复**：`main.py` 顶部加 `import readline`（标准库），Python `input()` 即可获得 GNU readline 支持（退格、左右方向键、历史记录等）。

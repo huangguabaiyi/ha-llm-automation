@@ -1053,6 +1053,16 @@ class HaLlmAutomationPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    try {
+      this._initState();
+      this._render();
+    } catch (e) {
+      this._renderFatalError(e, "constructor");
+    }
+    // Do NOT call _loadAutomations() here — wait for hass to be injected
+  }
+
+  _initState() {
     this._tab = "create";
     this._logs = [];  // [{text, cls}]
     this._loading = false;
@@ -1113,18 +1123,56 @@ class HaLlmAutomationPanel extends HTMLElement {
     // Misc state
     this._abortSignal = false;
     this._optimizeDiffMode = "side"; // "side" | "inline"
+  }
 
-    this._render();
-    // Do NOT call _loadAutomations() here — wait for hass to be injected
+  /**
+   * Render a visible, hard-coded error card when any lifecycle entry throws.
+   * MUST NOT depend on TRANSLATIONS / _i18n / _t / STYLES / this._hass / this._tab.
+   * If shadowRoot is unavailable, falls back to this.innerHTML; if that also
+   * fails, the console.error is still the last-resort signal.
+   */
+  _renderFatalError(err, phase) {
+    try { console.error(`[ha-llm-automation] fatal error in ${phase}:`, err); } catch (_) {}
+    const safe = (s) => {
+      try {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      } catch (_) { return ""; }
+    };
+    const stackSummary = (() => {
+      try { return (err && err.stack) ? err.stack.split("\n").slice(0, 5).join("\n") : ""; }
+      catch (_) { return ""; }
+    })();
+    const html = `
+      <div style="padding:24px;margin:12px;background:#3a0a0a;color:#ffd9d9;font-family:monospace;border:2px solid #7a2a2a;border-radius:8px;line-height:1.5">
+        <h2 style="margin:0 0 12px 0;color:#ff8080">⚠ HA LLM Automation — Panel failed to initialize</h2>
+        <div style="margin:6px 0"><b>面板初始化失败 / Panel initialization failed</b></div>
+        <div style="margin:6px 0"><b>Phase:</b> <code>${safe(phase)}</code></div>
+        <div style="margin:6px 0"><b>Error:</b> <code>${safe(err && err.message ? err.message : err)}</code></div>
+        ${stackSummary ? `<pre style="margin:8px 0;padding:8px;background:#1a0505;color:#ffb3b3;overflow:auto;max-height:200px;white-space:pre-wrap">${safe(stackSummary)}</pre>` : ""}
+        <div style="margin-top:12px;color:#ffb3b3">
+          下一步：打开浏览器 DevTools Console 查看完整堆栈；复制上面的内容去 GitHub 提 issue。<br>
+          Next: open DevTools Console for the full stack; copy the text above when filing an issue.
+        </div>
+      </div>
+    `;
+    try {
+      if (this.shadowRoot) { this.shadowRoot.innerHTML = html; return; }
+    } catch (_) {}
+    try { this.innerHTML = html; } catch (_) {}
   }
 
   connectedCallback() {
-    this._mqListener = () => {
-      // 仅当未强制主题时跟随系统切换
-      if (!this.hasAttribute("data-theme")) this._render();
-    };
-    window.matchMedia("(prefers-color-scheme: dark)")
-      .addEventListener("change", this._mqListener);
+    try {
+      this._mqListener = () => {
+        // 仅当未强制主题时跟随系统切换
+        if (!this.hasAttribute("data-theme")) this._render();
+      };
+      window.matchMedia("(prefers-color-scheme: dark)")
+        .addEventListener("change", this._mqListener);
+    } catch (e) {
+      this._renderFatalError(e, "connectedCallback");
+    }
   }
 
   disconnectedCallback() {
@@ -1136,11 +1184,15 @@ class HaLlmAutomationPanel extends HTMLElement {
   }
 
   set hass(val) {
-    const firstLoad = !this._hass;
-    this._hass = val;
-    if (firstLoad) {
-      this._render();
-      this._loadAutomations();
+    try {
+      const firstLoad = !this._hass;
+      this._hass = val;
+      if (firstLoad) {
+        this._render();
+        this._loadAutomations();
+      }
+    } catch (e) {
+      this._renderFatalError(e, "hass_setter");
     }
   }
 
@@ -2619,6 +2671,14 @@ class HaLlmAutomationPanel extends HTMLElement {
   // ------------------------------------------------------------------
 
   _render() {
+    try {
+      this._renderInner();
+    } catch (e) {
+      this._renderFatalError(e, "render");
+    }
+  }
+
+  _renderInner() {
     const tabs = [
       { id: "create", label: this._t("tab_create") },
       { id: "optimize", label: this._t("tab_optimize") },

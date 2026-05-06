@@ -8,6 +8,7 @@ HA LLM Automation — 集成入口
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -44,6 +45,22 @@ from .core.ha_bridge import create_ha_bridge
 _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
+MANIFEST_PATH = Path(__file__).parent / "manifest.json"
+
+
+def _read_manifest_version() -> str:
+    """Read version from manifest.json; fallback to '0' on failure.
+
+    Used to append ?v=<version> to the panel js_url so HA's PWA Service Worker
+    and the browser HTTP cache are forced to fetch fresh on every release.
+    Synchronous, reads a <1KB file once at setup time.
+    """
+    try:
+        with MANIFEST_PATH.open("r", encoding="utf-8") as f:
+            return str(json.load(f).get("version") or "0")
+    except Exception as e:
+        _LOGGER.warning("读取 manifest.json version 失败，js_url 降级为 v=0：%s", e)
+        return "0"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -91,6 +108,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ])
 
     # 注册侧边栏面板
+    # js_url 带 ?v=<manifest.version>：每次发版 URL 变化，强制浏览器/PWA SW 绕过缓存。
+    version = await hass.async_add_executor_job(_read_manifest_version)
     frontend.async_register_built_in_panel(
         hass,
         component_name="custom",
@@ -100,7 +119,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config={
             "_panel_custom": {
                 "name": PANEL_NAME,
-                "js_url": f"/{DOMAIN}/frontend/{PANEL_NAME}.js",
+                "js_url": f"/{DOMAIN}/frontend/{PANEL_NAME}.js?v={version}",
                 "embed_iframe": False,
                 "trust_external": False,
             }

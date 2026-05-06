@@ -151,6 +151,30 @@ HACS → HA LLM Automation → 移除
 
 ---
 
+## 🩹 面板白屏排障
+
+打开 **LLM Automation** 侧边栏后整块白屏？按下面步骤逐一排查（1.0.3 起自带诊断保护，多数白屏会变成红色错误卡片；如果依然白屏说明是交付层问题）：
+
+1. **确认实际加载的版本**
+   浏览器 DevTools → **Network** → 过滤 `ha-llm`，刷新一次。看到请求 `…/ha_llm_automation/frontend/ha-llm-automation.js?v=1.0.3`（或更高）+ 状态 `200` 才算拿到新版。如果 `v=` 停留在旧版号 → Service Worker / HACS 没更新，继续下一步。
+
+2. **硬刷新 + 无痕窗口**
+   Mac `Shift + Cmd + R`，Windows `Ctrl + F5`；仍然白屏就用**无痕/隐私窗口**打开 HA URL —— 无痕窗口绕过 PWA Service Worker 缓存，可以一秒鉴别是代码问题还是缓存问题。
+
+3. **看 Console**
+   DevTools → **Console**。
+   - 若有 **红色错误卡片**（1.0.3 起）：把卡片文字 + Console 堆栈复制到 issue，这是最有用的信息。
+   - 若有 `SyntaxError` 但没看到错误卡片 → 浏览器加载的还是旧 JS，回到第 1 步。
+   - 若 Console 干净但仍白屏 → 截图 Network + Console 到 issue。
+
+4. **清前端缓存**
+   HA 侧边栏 → **设置 → 面板**（或地址栏访问 `/config/dashboard`）→ 右上角三点 → **清除前端缓存**。之后刷新。
+
+5. **HACS 重装兜底**
+   HACS → HA LLM Automation → 更多 → **Redownload**（重新下载）→ 重启 HA。
+
+---
+
 ## 🐛 问题反馈
 
 遇到 bug 或有建议？欢迎提 [Issue](https://github.com/huangguabaiyi/ha-llm-automation/issues)。
