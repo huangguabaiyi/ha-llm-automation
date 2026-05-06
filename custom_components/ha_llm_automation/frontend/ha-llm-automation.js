@@ -8,6 +8,11 @@ const DOMAIN = "ha_llm_automation";
 // ============================================================
 // i18n — Translations (zh / en)
 // Follows hass.language: zh-Hans/zh-Hant → zh, otherwise → en
+//
+// Convention: translation values are ASCII double-quoted strings. Any literal
+// ASCII double quote inside a value MUST be escaped as \"; unescaped " will
+// produce a SyntaxError at module load and blank out the panel. Prefer full-
+// width quotes “ ” for quoted phrases to sidestep the footgun entirely.
 // ============================================================
 const TRANSLATIONS = {
   zh: {
@@ -32,7 +37,7 @@ const TRANSLATIONS = {
     opt_select_title: "选择要优化的自动化",
     opt_refresh: "🔄 刷新列表",
     opt_loading: "正在加载自动化列表...",
-    opt_load_fail: "加载失败，请点击"刷新列表"重试",
+    opt_load_fail: "加载失败，请点击\"刷新列表\"重试",
     opt_empty: "暂无可优化的自动化（存储型）",
     opt_placeholder: "— 请选择 —",
     opt_analyze_btn: "分析意图 ▶", opt_analyze_loading: "分析中...",
@@ -53,7 +58,7 @@ const TRANSLATIONS = {
     cons_refresh: "🔄 刷新列表",
     cons_desc: "分析所有已有自动化，识别可合并的重复项和需修复的问题，按场景整合。",
     cons_loading: "正在加载自动化列表...",
-    cons_load_fail: "加载失败，请点击"刷新列表"重试",
+    cons_load_fail: "加载失败，请点击\"刷新列表\"重试",
     cons_empty: "暂无可整合的自动化（存储型）",
     cons_select_label: "选择要参与整合的自动化（{sel}/{total} 已选）：",
     cons_inaccessible: "⚠ 不可访问",

@@ -383,6 +383,12 @@ python3 main.py backup restore [--file <path>]
 - 写入前自动备份，确保可回滚
 - 删除操作需二次确认
 
+### 前端 JS 校验（必做）
+
+- 每次修改 `custom_components/ha_llm_automation/frontend/*.js` 后、commit 前必须运行 `bash scripts/check_frontend.sh`
+- 脚本内部调用 `node --check`（零依赖，Node 18+），只做语法解析，失败即报错
+- 翻译值里出现 ASCII 双引号必须写成 `\"`（或改用全角 `“ ”`）。未转义即整份模块 SyntaxError → 面板白屏（v2.6 已踩过坑）
+
 ### Git
 
 - 已初始化本地 git 仓库（不需要 GitHub）
@@ -556,6 +562,13 @@ Step 4：生成合并 YAML（必须包含所有被合并自动化的全部设备
   - `_pushLog()` 颜色检测兼容中英文关键词（ERROR/错误、WARN/警告、OK/成功等）
 - **hacs.json**：项目根目录新增 HACS 集成元数据文件，支持未来 GitHub/HACS 发布
   - `homeassistant: "2024.2.0"`，`content_in_root: false`
+
+### v2.6.1 已修复（前端白屏回归）
+
+- **根因**：`frontend/ha-llm-automation.js` L35/L56 两条中文翻译值 `"加载失败，请点击"刷新列表"重试"` 将 ASCII 双引号嵌入同样用 ASCII 双引号包裹的字符串字面量（未转义），V8 抛 `SyntaxError: Unexpected identifier '刷新列表'` → 整份模块解析失败 → `customElements.define("ha-llm-automation", ...)` 从未执行 → HACS 安装后打开面板白屏
+- **修复**：两处改为 `"加载失败，请点击\"刷新列表\"重试"`，与英文版 `\"Refresh\"` 同构；`TRANSLATIONS` 注释块新增转义约定（用 `\"` 或改用全角 `“ ”`）
+- **兜底**：新增 `scripts/check_frontend.sh`（`node --check`，零依赖），对 `frontend/*.js` 做语法校验；已写入开发规范「前端 JS 校验（必做）」小节
+- **版本**：`manifest.json` 从 `2.6` bump 到 `2.6.1`
 
 ### macOS 退格键 / 方向键异常
 
